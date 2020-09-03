@@ -1,0 +1,28 @@
+BASE_TASK_CONFIG_PATH: habitat_extensions/config/vlnce_task.yaml
+SIMULATOR_GPU_ID: [0 , 2]
+TORCH_GPU_ID: 1
+NUM_PROCESSES: 16
+TENSORBOARD_DIR: /data/zirshad/VLNCE-data/data/tensorboard_dirs/seq2seq_pm_da_aug_tune
+CHECKPOINT_FOLDER: /data/zirshad/VLNCE-data/data/checkpoints/seq2seq_pm_da_aug_tune
+EVAL_CKPT_PATH_DIR: /data/zirshad/VLNCE-data/data/checkpoints/seq2seq_pm_da_aug_tune
+
+EVAL:
+  USE_CKPT_CONFIG: False
+  SPLIT: val_unseen
+  EPISODE_COUNT: 50000
+  VAL_LOG_DIR : validation_logging/seq2seq_pm_da_aug_tune
+
+DAGGER:
+  ITERATIONS: 10
+  EPOCHS: 4
+  UPDATE_SIZE: 5000
+  BATCH_SIZE: 5
+  P: 0.75
+  PRELOAD_LMDB_FEATURES: False
+  LMDB_FEATURES_DIR: /data/zirshad/VLNCE-data/data/trajectory_dir/seq2seq_pm_da_aug_tune/trajectories.lmdb
+  LOAD_FROM_CKPT: True
+  CKPT_TO_LOAD: /data/zirshad/VLNCE-data/data/checkpoints/seq2seq_pm_aug/best_checkpoint.pth # REPLACE
+
+MODEL:
+  PROGRESS_MONITOR:
+    use: True

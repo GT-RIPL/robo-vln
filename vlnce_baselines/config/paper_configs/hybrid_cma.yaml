@@ -1,0 +1,35 @@
+BASE_TASK_CONFIG_PATH: habitat_extensions/config/vlnce_task.yaml
+SIMULATOR_GPU_ID: [0]
+TORCH_GPU_ID: 0
+NUM_PROCESSES: 1
+TRAINER_NAME : "dagger"
+
+TENSORBOARD_DIR: /data/zirshad/VLNCE-data/data/tensorboard_dirs/hybrid_cma
+CHECKPOINT_FOLDER: /data/zirshad/VLNCE-data/data/checkpoints/hybrid_cma
+EVAL_CKPT_PATH_DIR: /data/zirshad/VLNCE-data/data/checkpoints/hybrid_cma
+
+VIDEO_DIR: "videos/debug/transformer/run_12"
+PLOT_ATTENTION: False
+VIDEO_OPTION: []  # options: "disk", "tensorboard"
+
+EVAL:
+  USE_CKPT_CONFIG: False
+  SPLIT: val_seen
+  EPISODE_COUNT: 778
+  VAL_LOG_DIR : validation_logging/transformer/run_12/ckpt34
+DAGGER:
+  ITERATIONS: 1
+  EPOCHS: 100
+  UPDATE_SIZE: 10819
+  BATCH_SIZE: 2
+  P: 1.0
+  PRELOAD_LMDB_FEATURES: True
+  LMDB_FEATURES_DIR: /data/zirshad/VLNCE-data/data/trajectory_dir/transformer_semantic/trajectories.lmdb
+
+MODEL:
+  TRANSFORMER:
+    use: True
+    split_gpus: True
+  INSTRUCTION_ENCODER:
+    use_pretrained_embeddings: False
+    is_bert: True

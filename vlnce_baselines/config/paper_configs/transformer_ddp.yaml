@@ -1,0 +1,34 @@
+BASE_TASK_CONFIG_PATH: habitat_extensions/config/vlnce_task.yaml
+SIMULATOR_GPU_ID: [0,2]
+TORCH_GPU_ID: 0
+NUM_PROCESSES: 8
+TRAINER_NAME : "transformer_ddp"
+
+TENSORBOARD_DIR: /data/zirshad/VLNCE-data/data/tensorboard_dirs/transformer/run_test
+CHECKPOINT_FOLDER: /data/zirshad/VLNCE-data/data/checkpoints/transformer/run_test
+EVAL_CKPT_PATH_DIR: /data/zirshad/VLNCE-data/data/checkpoints/tranSformer/run_test
+
+VIDEO_DIR: "videos/debug/transformer/run_7"
+PLOT_ATTENTION: True
+VIDEO_OPTION: []  # options: "disk", "tensorboard"
+
+EVAL:
+  USE_CKPT_CONFIG: False
+  SPLIT: val_seen
+  EPISODE_COUNT: 778
+  VAL_LOG_DIR : validation_logging/transformer
+DAGGER:
+  ITERATIONS: 1
+  EPOCHS: 100
+  UPDATE_SIZE: 10819
+  BATCH_SIZE: 3
+  P: 1.0
+  PRELOAD_LMDB_FEATURES: True
+  LMDB_FEATURES_DIR: /data/zirshad/VLNCE-data/data/trajectory_dir/transformer/trajectories.lmdb
+
+MODEL:
+  TRANSFORMER:
+    use: True
+  INSTRUCTION_ENCODER:
+    use_pretrained_embeddings: False
+    is_bert: True
