@@ -116,7 +116,7 @@ class LanguageEncoder(nn.Module):
                 embedded = embedded[0]
         else:
             embedded = self.embedding_layer(instruction)
-        print("Embedded shape:",embedded.shape)
+        # print("Embedded shape:",embedded.shape)
         # batch_size = observations["instruction"].shape[0]
         embedded = self.drop(embedded)
         batch_size = observations["instruction"].shape[0]
@@ -140,7 +140,7 @@ class LanguageEncoder(nn.Module):
             # ].permute(0, 2, 1), hidden
             output = nn.utils.rnn.pad_packed_sequence(output, batch_first=True)[0]
 
-        print("hidden", hidden[0].shape)
+        # print("hidden", hidden[0].shape)
 
         h_t = torch.tanh(self.encoder2decoder(hidden[0][-1]))
         h_t = h_t.unsqueeze(0)

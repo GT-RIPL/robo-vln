@@ -153,7 +153,7 @@ class TorchVisionResNet50(nn.Module):
 
         if not self.spatial_output and not self.resnet_output:
             self.output_shape = (output_size,)
-            self.fc = nn.Linear(linear_layer_input_size, output_size).cuda(2)
+            self.fc = nn.Linear(linear_layer_input_size, output_size)
             self.activation = nn.ReLU()
         elif self.spatial_output:
 
