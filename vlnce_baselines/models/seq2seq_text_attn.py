@@ -27,9 +27,15 @@ class Seq2Seq_Lang_Attn(BasePolicy):
             Seq2SeqNet(
                 observation_space=observation_space,
                 model_config=model_config,
-                num_actions=action_space.n,
+                num_actions=2,
             ),
-            action_space.n,
+            2,
+        )
+
+    def from_config(cls, config, env):
+        return cls(
+            observation_space=env.observation_space,
+            action_space=env.action_space,
         )
 
 
@@ -154,6 +160,8 @@ class Seq2SeqNet(Net):
             rgb_embedding = rgb_embedding * 0
 
         x = torch.cat([depth_embedding, rgb_embedding], dim=1)
+
+        print("x:", x.shape)
 
         if self.model_config.SEQ2SEQ.use_prev_action:
             prev_actions_embedding = self.prev_action_embedding(

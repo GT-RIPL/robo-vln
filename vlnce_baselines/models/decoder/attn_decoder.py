@@ -333,10 +333,12 @@ class Attn_DecoderSequence(nn.Module):
                 A (T, N) tensor flatten to (T * N)
         """
         # x is a (T, N, -1) tensor flattened to (T * N, -1)
-        batch_size = hidden_states[0].size(1)
+        batch_size = hidden_states[0].size(0)
 
         masks = torch.ones(batch_size, 1, device=device)
         N = int(x.size(0)/batch_size)
+
+        # print("x shape:",x.shape)
         x = x.view(batch_size, N, -1)
         x = self.drop(x)
         decoder_max_len = x.shape[1]

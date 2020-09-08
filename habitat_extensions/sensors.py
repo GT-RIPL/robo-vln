@@ -10,6 +10,8 @@ from habitat.core.registry import registry
 from habitat.core.simulator import Sensor, SensorTypes, Simulator
 from habitat.sims.habitat_simulator.actions import HabitatSimActions
 from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
+
+from habitat_extensions.sensor_utils import ContinuousPathFollower
 # from habitat_extensions.sensor_utils import (
 #     constrain_to_pm_pi,
 #     gen_point_cloud,

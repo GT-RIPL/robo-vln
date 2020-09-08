@@ -7,9 +7,76 @@ import quaternion
 from PIL import Image
 
 from habitat.utils.visualizations import maps
-from habitat.utils.visualizations.maps import COORDINATE_MAX, COORDINATE_MIN
+# from habitat.utils.visualizations.maps import COORDINATE_MAX, COORDINATE_MIN
 from habitat.utils.visualizations.utils import images_to_video
 
+class ContinuousPathFollower(object):
+    def __init__(self, sim, path, waypoint_threshold):
+        self._sim = sim
+        self._points = np.array(path[:])
+        assert len(self._points) > 0
+        self._length = self._sim.geodesic_distance(path[0], path[-1])
+        self._threshold = waypoint_threshold
+        self._step_size = 0.01
+        self.progress = 0  # geodesic distance -> [0,1]
+        self.waypoint = np.array(path[0])
+
+        # setup progress waypoints
+        _point_progress = [0]
+        _segment_tangents = []
+        _length = self._length
+        for ix, point in enumerate(self._points):
+            if ix > 0:
+                segment = point - self._points[ix - 1]
+                segment_length = np.linalg.norm(segment)
+                segment_tangent = segment / segment_length
+                _point_progress.append(
+                    segment_length / _length + _point_progress[ix - 1]
+                )
+                # t-1 -> t
+                _segment_tangents.append(segment_tangent)
+        self._point_progress = _point_progress
+        self._segment_tangents = _segment_tangents
+        # final tangent is duplicated
+        self._segment_tangents.append(self._segment_tangents[-1])
+
+        # print("self._length = " + str(self._length))
+        # print("num points = " + str(len(self._points)))
+        # print("self._point_progress = " + str(self._point_progress))
+        # print("self._segment_tangents = " + str(self._segment_tangents))
+
+    def pos_at(self, progress):
+        if progress <= 0:
+            return self._points[0]
+        elif progress >= 1.0:
+            return self._points[-1]
+
+        path_ix = 0
+        for ix, prog in enumerate(self._point_progress):
+            if prog > progress:
+                path_ix = ix
+                break
+
+        segment_distance = self._length * (progress - self._point_progress[path_ix - 1])
+        return (
+            self._points[path_ix - 1]
+            + self._segment_tangents[path_ix - 1] * segment_distance
+        )
+
+    def update_waypoint(self):
+        if self.progress < 1.0:
+            wp_disp = self.waypoint - self._sim.get_agent_state().position
+            wp_dist = np.linalg.norm(wp_disp)
+            node_pos = self._sim.get_agent_state().position
+            step_size = self._step_size
+            threshold = self._threshold
+            while wp_dist < threshold:
+                self.progress += step_size
+                self.waypoint = self.pos_at(self.progress)
+                if self.progress >= 1.0:
+                    break
+                wp_disp = self.waypoint - node_pos
+                wp_dist = np.linalg.norm(wp_disp)
 
 def print_scene_recur(scene, limit_output=10):
     print(

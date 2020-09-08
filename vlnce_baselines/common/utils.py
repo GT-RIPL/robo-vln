@@ -1,21 +1,28 @@
 from typing import Dict, List
 from transformers import BertTokenizer
 import torch
+from transformers import AutoTokenizer
+
+from tokenizers import (ByteLevelBPETokenizer,
+                            CharBPETokenizer,
+                            SentencePieceBPETokenizer,
+                            BertWordPieceTokenizer)
 
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "True"
 
 
 def get_bert_tokens(sentence, max_seq_length, tokenizer):
-    tokens = tokenizer.tokenize(sentence)
-    tokens = ['[CLS]'] + tokens + ['[SEP]']
-    if len(tokens) < max_seq_length:
-        padded_tokens = tokens + ['[PAD]' for _ in range(max_seq_length - len(tokens))]
-    token_ids = tokenizer.convert_tokens_to_ids(padded_tokens)
-    return token_ids
+    output = tokenizer.encode(sentence)
+    # tokens = tokenizer.tokenize(sentence)
+    # tokens = ['[CLS]'] + tokens + ['[SEP]']
+    # if len(tokens) < max_seq_length:
+    #     padded_tokens = tokens + ['[PAD]' for _ in range(max_seq_length - len(tokens))]
+    # token_ids = tokenizer.convert_tokens_to_ids(padded_tokens)
+    return output.ids
 
 def transform_obs(
-    observations: List[Dict], instruction_sensor_uuid: str, is_bert = False, max_seq_length = 200
+    observations: Dict, instruction_sensor_uuid: str, is_bert = False, max_seq_length = 200
 ) -> Dict[str, torch.Tensor]:
     r"""Extracts instruction tokens from an instruction sensor and
     transposes a batch of observation dicts to a dict of batched
@@ -31,21 +38,22 @@ def transform_obs(
     Returns:
         transposed dict of lists of observations.
     """
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    for i in range(len(observations)):
-        if is_bert:
-            instruction = observations[i][
-                instruction_sensor_uuid
-            ]["text"]
-            token_ids = get_bert_tokens(instruction , max_seq_length, tokenizer)
-            observations[i][instruction_sensor_uuid] = token_ids
-            # observations[i][instruction_sensor_uuid] = observations[i][
-            #     instruction_sensor_uuid
-            # ]["tokens"]
-        else:
-            observations[i][instruction_sensor_uuid] = observations[i][
-                instruction_sensor_uuid
-            ]["tokens"]
+
+    tokenizer = BertWordPieceTokenizer("vocab_files/bert-base-uncased-vocab.txt", lowercase=True)
+    # tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    if is_bert:
+        instruction = observations[
+            instruction_sensor_uuid
+        ]["text"]
+        token_ids = get_bert_tokens(instruction , max_seq_length, tokenizer)
+        observations[instruction_sensor_uuid] = token_ids
+        # observations[i][instruction_sensor_uuid] = observations[i][
+        #     instruction_sensor_uuid
+        # ]["tokens"]
+    else:
+        observations[instruction_sensor_uuid] = observations[
+            instruction_sensor_uuid
+        ]["tokens"]
 
     return observations
 

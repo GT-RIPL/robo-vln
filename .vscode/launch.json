@@ -11,7 +11,7 @@
             "type": "python",
             "request": "launch",
             "program": "${file}",
-            "args":["--exp-config", "vlnce_baselines/config/paper_configs/seq2seq_sem_attn.yaml", "--run-type", "eval"],
+            "args":["--exp-config", "vlnce_baselines/config/paper_configs/seq2seq_text_attn_robo.yaml", "--run-type", "train"],
             "console": "integratedTerminal"
         }
     ]

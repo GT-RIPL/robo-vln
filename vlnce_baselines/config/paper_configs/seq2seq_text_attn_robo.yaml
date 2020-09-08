@@ -1,7 +1,8 @@
-BASE_TASK_CONFIG_PATH: habitat_extensions/config/vlnce_task.yaml
+BASE_TASK_CONFIG_PATH: habitat_extensions/config/robo_vlnce_task.yaml
 SIMULATOR_GPU_ID: [0]
 TORCH_GPU_ID: 0
-NUM_PROCESSES: 6
+NUM_PROCESSES: 1
+TRAINER_NAME : "robo_dagger"
 
 TENSORBOARD_DIR: /home/asawaree2/data/tensorboard_dirs/seq2seq_text_attn/test
 CHECKPOINT_FOLDER: /home/asawaree2/data/checkpoints/seq2seq_text_attn/test
@@ -19,11 +20,11 @@ EVAL:
 DAGGER:
   ITERATIONS: 1
   EPOCHS: 45
-  UPDATE_SIZE: 10819
-  BATCH_SIZE: 3
+  UPDATE_SIZE: 10
+  BATCH_SIZE: 1
   P: 1.0
   PRELOAD_LMDB_FEATURES: False
-  LMDB_FEATURES_DIR: /home/asawaree2/data/trajectory_dir/seq2seq_text_attn/complete/trajectories.lmdb
+  LMDB_FEATURES_DIR: /home/asawaree2/data/trajectory_dir/seq2seq_text_attn_robo/trajectories.lmdb
 
 MODEL:
   LANG_ATTN:

@@ -61,10 +61,13 @@ _C.DAGGER.EPOCHS = 10
 _C.DAGGER.UPDATE_SIZE = 5000
 _C.DAGGER.BATCH_SIZE = 3
 _C.DAGGER.P = 1.0
+_C.DAGGER.time_step = 1.0 / (30)
 _C.DAGGER.LMDB_MAP_SIZE = 1.0e12
 # How often to commit the writes to the DB, less commits is
 # better, but everything must be in memory until a commit happens/
-_C.DAGGER.LMDB_COMMIT_FREQUENCY = 500
+_C.DAGGER.LMDB_COMMIT_FREQUENCY = 10
+_C.DAGGER.LMDB_STORE_FREQUENCY = 5
+
 _C.DAGGER.USE_IW = True
 # If True, load precomputed features directly from LMDB_FEATURES_DIR.
 _C.DAGGER.PRELOAD_LMDB_FEATURES = False
@@ -166,7 +169,7 @@ _C.MODEL.STATE_ENCODER.hidden_size = 256
 _C.MODEL.STATE_ENCODER.rnn_type = "LSTM"
 
 _C.MODEL.SEQ2SEQ = CN()
-_C.MODEL.SEQ2SEQ.use_prev_action = True
+_C.MODEL.SEQ2SEQ.use_prev_action = False
 
 _C.MODEL.CMA = CN()
 _C.MODEL.CMA.use = False

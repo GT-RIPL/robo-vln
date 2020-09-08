@@ -1,5 +1,5 @@
 ENVIRONMENT:
-  MAX_EPISODE_STEPS: 500
+  MAX_EPISODE_STEPS: 1000
 SIMULATOR:
   AGENT_0:
     # SENSORS: [RGB_SENSOR, DEPTH_SENSOR, SEMANTIC_SENSOR]
@@ -52,10 +52,10 @@ TASK:
   ]
   NDTW:
     SUCCESS_DISTANCE: 3.0
-    GT_PATH: data/datasets/robo-vln/{split}/{split}_gt.json.gz
+    GT_PATH: data/datasets/robo_vln/{split}/{split}_gt.json.gz
   SDTW:
     SUCCESS_DISTANCE: 3.0
-    GT_PATH: data/datasets/robo-vln/{split}/{split}_gt.json.gz
+    GT_PATH: data/datasets/robo_vln/{split}/{split}_gt.json.gz
   SPL:
     SUCCESS_DISTANCE: 3.0
   SUCCESS:
@@ -65,5 +65,5 @@ TASK:
 DATASET:
   TYPE: VLN-CE-v1
   SPLIT: train
-  DATA_PATH: data/datasets/robo-vln/{split}/{split}.json.gz
+  DATA_PATH: data/datasets/robo_vln/{split}/{split}.json.gz
   SCENES_DIR: data/scene_datasets/
