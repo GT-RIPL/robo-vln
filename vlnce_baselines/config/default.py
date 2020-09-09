@@ -65,7 +65,7 @@ _C.DAGGER.time_step = 1.0 / (30)
 _C.DAGGER.LMDB_MAP_SIZE = 1.0e12
 # How often to commit the writes to the DB, less commits is
 # better, but everything must be in memory until a commit happens/
-_C.DAGGER.LMDB_COMMIT_FREQUENCY = 10
+_C.DAGGER.LMDB_COMMIT_FREQUENCY = 500
 _C.DAGGER.LMDB_STORE_FREQUENCY = 5
 
 _C.DAGGER.USE_IW = True

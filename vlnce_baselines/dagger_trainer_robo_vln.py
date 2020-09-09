@@ -420,10 +420,9 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 self.envs.habitat_env._sim, reference_path, waypoint_threshold=0.4)
 
                 done = False
-
-                start_time = time.time()
-                print("start time:", time)
                 while continuous_path_follower.progress < 1.0:
+                    if done:
+                        break
                     continuous_path_follower.update_waypoint()
                     agent_state = self.envs.habitat_env._sim.get_agent_state()
                     previous_rigid_state = habitat_sim.RigidState(
@@ -453,7 +452,6 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
                 # episodes.append(episode)
 
-                print("end time:", time.time()-start_time)
                 # Save episode to LMDB directory
                 traj_obs = batch_obs([step[0] for step in episode],  device=torch.device("cpu"))
                 for k, v in traj_obs.items():
