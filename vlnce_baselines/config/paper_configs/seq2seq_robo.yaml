@@ -1,0 +1,33 @@
+BASE_TASK_CONFIG_PATH: habitat_extensions/config/robo_vlnce_task.yaml
+SIMULATOR_GPU_ID: [0]
+TORCH_GPU_ID: 0
+NUM_PROCESSES: 1
+TRAINER_NAME : "robo_dagger"
+
+TENSORBOARD_DIR: /home/mirshad7/data/tensorboard_dirs/seq2seq/test
+CHECKPOINT_FOLDER: /home/mirshad7/data/checkpoints/seq2seq/test
+EVAL_CKPT_PATH_DIR: /home/mirshad7/data/zirshad/VLNCE-data/data/checkpoints/seq2seq/test
+
+VIDEO_DIR: "videos/debug/seq2seq_text_attn/test/seen"
+PLOT_ATTENTION: True
+VIDEO_OPTION: []  # options: "disk", "tensorboard"
+
+EVAL:
+  USE_CKPT_CONFIG: False
+  SPLIT: val_seen
+  EPISODE_COUNT: 778
+  VAL_LOG_DIR : validation_logging/seq2seq_text_attn/test_run/seen
+DAGGER:
+  ITERATIONS: 1
+  EPOCHS: 45
+  UPDATE_SIZE: 20
+  BATCH_SIZE: 1
+  P: 1.0
+  PRELOAD_LMDB_FEATURES: True
+  LMDB_FEATURES_DIR: /home/mirshad7/data/trajectory_dir/seq2seq_text_attn_robo/trajectories.lmdb
+
+
+MODEL:
+  INSTRUCTION_ENCODER:
+    use_pretrained_embeddings: False
+    is_bert: True

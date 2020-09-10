@@ -9,7 +9,7 @@ from habitat_baselines.rl.models.rnn_state_encoder import RNNStateEncoder
 from habitat_baselines.rl.ppo.policy import Net
 
 from vlnce_baselines.common.aux_losses import AuxLosses
-from vlnce_baselines.models.encoders.instruction_encoder import InstructionEncoder
+from vlnce_baselines.models.encoders.language_encoder import LanguageEncoder
 from vlnce_baselines.models.encoders.resnet_encoders import (
     TorchVisionResNet50,
     VlnResnetDepthEncoder,
@@ -26,9 +26,14 @@ class Seq2SeqPolicy(BasePolicy):
             Seq2SeqNet(
                 observation_space=observation_space,
                 model_config=model_config,
-                num_actions=action_space.n,
+                num_actions=2,
             ),
-            action_space.n,
+            2,
+        )
+    def from_config(cls, config, env):
+        return cls(
+            observation_space=env.observation_space,
+            action_space=env.action_space,
         )
 
 
@@ -47,8 +52,14 @@ class Seq2SeqNet(Net):
         super().__init__()
         self.model_config = model_config
 
+        device = (
+            torch.device("cuda", model_config.TORCH_GPU_ID)
+            if torch.cuda.is_available()
+            else torch.device("cpu")
+        )
+
         # Init the instruction encoder
-        self.instruction_encoder = InstructionEncoder(model_config.INSTRUCTION_ENCODER)
+        self.instruction_encoder = LanguageEncoder(model_config.INSTRUCTION_ENCODER, device)
 
         # Init the depth encoder
         assert model_config.DEPTH_ENCODER.cnn_type in [
@@ -78,13 +89,11 @@ class Seq2SeqNet(Net):
                 observation_space, model_config.RGB_ENCODER.output_size
             )
         elif model_config.RGB_ENCODER.cnn_type == "TorchVisionResNet50":
-            device = (
-                torch.device("cuda", model_config.TORCH_GPU_ID)
-                if torch.cuda.is_available()
-                else torch.device("cpu")
-            )
             self.rgb_encoder = TorchVisionResNet50(
-                observation_space, model_config.RGB_ENCODER.output_size, device
+                observation_space, 
+                model_config.RGB_ENCODER.output_size, 
+                model_config.RGB_ENCODER.resnet_output_size, 
+                device
             )
 
         if model_config.SEQ2SEQ.use_prev_action:
@@ -147,6 +156,12 @@ class Seq2SeqNet(Net):
         if self.model_config.ablate_rgb:
             rgb_embedding = rgb_embedding * 0
 
+
+        instruction_embedding = instruction_embedding.expand(rgb_embedding.shape[0], instruction_embedding.shape[1])
+
+        print("instruction embded",instruction_embedding.shape)
+        print("depth embed",depth_embedding.shape)
+        print("rgb embed",rgb_embedding.shape)
         x = torch.cat([instruction_embedding, depth_embedding, rgb_embedding], dim=1)
 
         if self.model_config.SEQ2SEQ.use_prev_action:
@@ -154,7 +169,7 @@ class Seq2SeqNet(Net):
                 ((prev_actions.float() + 1) * masks).long().view(-1)
             )
             x = torch.cat([x, prev_actions_embedding], dim=1)
-
+        masks = masks[:,0]
         x, rnn_hidden_states = self.state_encoder(x, rnn_hidden_states, masks)
 
         if self.model_config.PROGRESS_MONITOR.use and AuxLosses.is_active():
