@@ -2,7 +2,7 @@ from typing import Dict, List
 from transformers import BertTokenizer
 import torch
 from transformers import AutoTokenizer
-
+from collections import defaultdict
 from tokenizers import (ByteLevelBPETokenizer,
                             CharBPETokenizer,
                             SentencePieceBPETokenizer,
@@ -42,6 +42,7 @@ def transform_obs(
     tokenizer = BertWordPieceTokenizer("vocab_files/bert-base-uncased-vocab.txt", lowercase=True)
     # tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     if is_bert:
+        observations['glove_tokens'] = observations[instruction_sensor_uuid]["tokens"]
         instruction = observations[
             instruction_sensor_uuid
         ]["text"]
@@ -56,6 +57,53 @@ def transform_obs(
         ]["tokens"]
 
     return observations
+
+
+def split_batch_tbptt(batch, prev_actions, not_done_masks, corrected_actions, tbptt_steps, split_dim):
+    new_observations_batch = defaultdict(list)
+    split_observations_batch = defaultdict()
+    batch_split=[]
+    for sensor in batch:
+        if sensor == 'instruction':
+            new_observations_batch[sensor] = batch[sensor]
+            continue
+        for x in batch[sensor].split(tbptt_steps, dim=split_dim):
+            new_observations_batch[sensor].append(x)            
+    for i, (prev_action_split, corrected_action_split, masks_split) in enumerate(
+            zip(prev_actions.split(tbptt_steps, dim=split_dim), 
+                  corrected_actions.split(tbptt_steps, dim=split_dim), 
+                  not_done_masks.split(tbptt_steps, dim=split_dim))):
+            for sensor in new_observations_batch:
+                if sensor == 'instruction':
+                    split_observations_batch[sensor] = new_observations_batch[sensor]
+                else:
+                    split_observations_batch[sensor] = new_observations_batch[sensor][i]
+            split = (split_observations_batch, prev_action_split, masks_split, corrected_action_split)
+            split_observations_batch = {}
+            batch_split.append(split)
+            
+    return batch_split
+
+def repackage_mini_batch(batch):
+    split_observations_batch, prev_action_split, not_done_masks, corrected_action_split = batch
+    for sensor in split_observations_batch:
+        split_observations_batch[sensor] = split_observations_batch[sensor].contiguous().view(
+            -1, *split_observations_batch[sensor].size()[2:]
+        )
+    return (
+        split_observations_batch,
+        prev_action_split.contiguous().view(-1, 2),
+        not_done_masks.contiguous().view(-1, 2),
+        corrected_action_split.contiguous().view(-1,2),
+    )
+
+def repackage_hidden(h):
+    """Wraps hidden states in new Tensors, to detach them from their history."""
+
+    if isinstance(h, torch.Tensor):
+        return h.detach()
+    else:
+        return tuple(repackage_hidden(v) for v in h)
 
 def position_embedding(input, d_model):
     input = input.view(-1, 1)

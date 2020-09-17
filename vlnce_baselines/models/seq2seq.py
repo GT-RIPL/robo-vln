@@ -6,38 +6,19 @@ import torch.nn.functional as F
 from gym import Space
 from habitat import Config
 from habitat_baselines.rl.models.rnn_state_encoder import RNNStateEncoder
-from habitat_baselines.rl.ppo.policy import Net
+# from habitat_baselines.rl.ppo.policy import Net
 
 from vlnce_baselines.common.aux_losses import AuxLosses
 from vlnce_baselines.models.encoders.language_encoder import LanguageEncoder
+from vlnce_baselines.models.encoders.instruction_encoder import InstructionEncoder
 from vlnce_baselines.models.encoders.resnet_encoders import (
     TorchVisionResNet50,
     VlnResnetDepthEncoder,
 )
 from vlnce_baselines.models.encoders.simple_cnns import SimpleDepthCNN, SimpleRGBCNN
-from vlnce_baselines.models.policy import BasePolicy
+# from vlnce_baselines.models.policy import BasePolicy
 
-
-class Seq2SeqPolicy(BasePolicy):
-    def __init__(
-        self, observation_space: Space, action_space: Space, model_config: Config
-    ):
-        super().__init__(
-            Seq2SeqNet(
-                observation_space=observation_space,
-                model_config=model_config,
-                num_actions=2,
-            ),
-            2,
-        )
-    def from_config(cls, config, env):
-        return cls(
-            observation_space=env.observation_space,
-            action_space=env.action_space,
-        )
-
-
-class Seq2SeqNet(Net):
+class Seq2SeqNet(nn.Module):
     r"""A baseline sequence to sequence network that concatenates instruction,
     RGB, and depth encodings before decoding an action distribution with an RNN.
 
@@ -48,10 +29,10 @@ class Seq2SeqNet(Net):
         RNN state encoder
     """
 
-    def __init__(self, observation_space: Space, model_config: Config, num_actions):
+    def __init__(self, observation_space: Space, num_actions: int, model_config: Config, batch_size: int):
         super().__init__()
         self.model_config = model_config
-
+        self.batch_size = batch_size
         device = (
             torch.device("cuda", model_config.TORCH_GPU_ID)
             if torch.cuda.is_available()
@@ -59,8 +40,11 @@ class Seq2SeqNet(Net):
         )
 
         # Init the instruction encoder
-        self.instruction_encoder = LanguageEncoder(model_config.INSTRUCTION_ENCODER, device)
 
+        if model_config.INSTRUCTION_ENCODER.is_bert:
+            self.instruction_encoder = LanguageEncoder(model_config.INSTRUCTION_ENCODER, device)
+        else:
+            self.instruction_encoder = InstructionEncoder(model_config.INSTRUCTION_ENCODER)    
         # Init the depth encoder
         assert model_config.DEPTH_ENCODER.cnn_type in [
             "SimpleDepthCNN",
@@ -123,6 +107,17 @@ class Seq2SeqNet(Net):
         self._init_layers()
 
         self.train()
+        self.linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, num_actions)
+
+    def pad_instructions(self, observations):
+        instructions =[]
+        for i in range(self.batch_size):
+            instruction = observations['instruction'][i,:].unsqueeze(0)
+            instructions.append(instruction.expand(int(observations['rgb'].shape[0]/self.batch_size), instruction.shape[1]).unsqueeze(0))    
+        del instruction
+        instructions = torch.cat(instructions, dim=0)
+        instructions = instructions.view(-1, *instructions.size()[2:])
+        return instructions.long()
 
     @property
     def output_size(self):
@@ -140,21 +135,20 @@ class Seq2SeqNet(Net):
         nn.init.kaiming_normal_(self.progress_monitor.weight, nonlinearity="tanh")
         nn.init.constant_(self.progress_monitor.bias, 0)
 
-    def repackage_hidden(self,h):
-        """Wraps hidden states in new Tensors, to detach them from their history."""
-
-        if isinstance(h, torch.Tensor):
-            return h.data
-        else:
-            return tuple(repackage_hidden(v) for v in h)
-
-    def forward(self, observations, rnn_hidden_states, prev_actions, masks):
+    def forward(self, batch):
         r"""
         instruction_embedding: [batch_size x INSTRUCTION_ENCODER.output_size]
         depth_embedding: [batch_size x DEPTH_ENCODER.output_size]
         rgb_embedding: [batch_size x RGB_ENCODER.output_size]
         """
-        instruction_embedding = self.instruction_encoder(observations)
+
+        observations, rnn_hidden_states, prev_actions, masks = batch
+        del batch
+
+        # instructions = self.pad_instructions(observations)
+        # del observations['instruction']
+
+        instruction_embedding = self.instruction_encoder(observations['instruction'].long())
         depth_embedding = self.depth_encoder(observations)
         rgb_embedding = self.rgb_encoder(observations)
         if self.model_config.ablate_instruction:
@@ -164,12 +158,7 @@ class Seq2SeqNet(Net):
         if self.model_config.ablate_rgb:
             rgb_embedding = rgb_embedding * 0
 
-
         instruction_embedding = instruction_embedding.expand(rgb_embedding.shape[0], instruction_embedding.shape[1])
-
-        print("instruction embded",instruction_embedding.shape)
-        print("depth embed",depth_embedding.shape)
-        print("rgb embed",rgb_embedding.shape)
         x = torch.cat([instruction_embedding, depth_embedding, rgb_embedding], dim=1)
 
         del instruction_embedding, depth_embedding, rgb_embedding
@@ -179,9 +168,6 @@ class Seq2SeqNet(Net):
             )
             x = torch.cat([x, prev_actions_embedding], dim=1)
         masks = masks[:,0]
-
-
-        rnn_hidden_states = self.repackage_hidden(rnn_hidden_states)
 
         x, rnn_hidden_states = self.state_encoder(x, rnn_hidden_states, masks)
 
@@ -196,4 +182,5 @@ class Seq2SeqNet(Net):
                 self.model_config.PROGRESS_MONITOR.alpha,
             )
 
+        x = self.linear(x)
         return x, rnn_hidden_states

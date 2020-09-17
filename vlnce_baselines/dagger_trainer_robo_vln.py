@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import scipy.misc
 import time
 import habitat_sim
-
+import gc
 import time 
 
 from habitat_sim.utils.common import quat_to_magnum
@@ -340,15 +340,15 @@ class RoboDaggerTrainer(BaseRLTrainer):
         if not self.config.MODEL.TRANSFORMER.split_gpus:
             self.actor_critic.to(self.device)    
 
-        # self.optimizer = torch.optim.Adam(
-        #     self.actor_critic.parameters(), lr=self.config.DAGGER.LR
-        # )
+        self.optimizer = torch.optim.Adam(
+            self.actor_critic.parameters(), lr=self.config.DAGGER.LR
+        )
 
-        self.optimizer = torch.optim.AdamW(self.actor_critic.parameters(), 
-                                    lr=self.config.MODEL.TRANSFORMER.lr, 
-                                    weight_decay=self.config.MODEL.TRANSFORMER.weight_decay)
+        # self.optimizer = torch.optim.AdamW(self.actor_critic.parameters(), 
+        #                             lr=self.config.MODEL.TRANSFORMER.lr, 
+        #                             weight_decay=self.config.MODEL.TRANSFORMER.weight_decay)
 
-        self.scheduler = torch.optim.lr_scheduler.CyclicLR(self.optimizer, base_lr=2e-6, max_lr=1e-4, step_size_up=1000,step_size_down=50000, cycle_momentum=False)
+        # self.scheduler = torch.optim.lr_scheduler.CyclicLR(self.optimizer, base_lr=2e-6, max_lr=1e-4, step_size_up=1000,step_size_down=50000, cycle_momentum=False)
         if load_from_ckpt:
             ckpt_dict = self.load_checkpoint(ckpt_path, map_location="cpu")
             self.actor_critic.load_state_dict(ckpt_dict["state_dict"])
@@ -759,7 +759,9 @@ class RoboDaggerTrainer(BaseRLTrainer):
         #     except:
         #         pass
 
-        loss_data = action_loss.item()
+        loss_data = action_loss.detach()
+
+        gc.collect()
         # if isinstance(aux_loss, torch.Tensor):
         #     aux_loss_data = aux_loss.item()
         # else:
@@ -940,8 +942,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
                                 action_loss += output[1]
                                 aux_loss += output[2]
 
-                        # For CyclicalLR
-                        self.scheduler.step()
+                        # # For CyclicalLR
+                        # self.scheduler.step()
 
                         logger.info(f"train_loss: {loss}")
                         # logger.info(f"train_action_loss: {action_loss}")

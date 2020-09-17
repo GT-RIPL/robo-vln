@@ -62,7 +62,10 @@ _C.DAGGER.UPDATE_SIZE = 5000
 _C.DAGGER.BATCH_SIZE = 3
 _C.DAGGER.P = 1.0
 _C.DAGGER.time_step = 1.0 / (30)
-_C.DAGGER.LMDB_MAP_SIZE = 1.0e12
+_C.DAGGER.LMDB_MAP_SIZE = 2.4e12
+_C.DAGGER.tbptt_steps = 100
+_C.DAGGER.split_dim = 0
+
 # How often to commit the writes to the DB, less commits is
 # better, but everything must be in memory until a commit happens/
 _C.DAGGER.LMDB_COMMIT_FREQUENCY = 500
@@ -93,7 +96,7 @@ _C.MODEL.INSTRUCTION_ENCODER.vocab_size = 2504
 _C.MODEL.INSTRUCTION_ENCODER.max_length = 200
 _C.MODEL.INSTRUCTION_ENCODER.use_pretrained_embeddings = True
 _C.MODEL.INSTRUCTION_ENCODER.embedding_file = (
-    "data/datasets/R2R_VLNCE_v1_preprocessed/embeddings.json.gz"
+    "data/datasets/robo_vln/embeddings.json.gz"
 )
 _C.MODEL.INSTRUCTION_ENCODER.dataset_vocab = (
     "data/datasets/R2R_VLNCE_v1_preprocessed/train/train.json.gz"
@@ -102,7 +105,7 @@ _C.MODEL.INSTRUCTION_ENCODER.fine_tune_embeddings = False
 _C.MODEL.INSTRUCTION_ENCODER.embedding_size = 768
 _C.MODEL.INSTRUCTION_ENCODER.hidden_size = 256
 _C.MODEL.INSTRUCTION_ENCODER.rnn_type = "LSTM"
-_C.MODEL.INSTRUCTION_ENCODER.final_state_only = False
+_C.MODEL.INSTRUCTION_ENCODER.final_state_only = True
 _C.MODEL.INSTRUCTION_ENCODER.bidirectional = False
 _C.MODEL.INSTRUCTION_ENCODER.dropout_ratio = 0.25
 _C.MODEL.INSTRUCTION_ENCODER.is_bert = False

@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import scipy.misc
 import time
 import habitat_sim
-
+import gc
 import time 
 
 from habitat_sim.utils.common import quat_to_magnum
@@ -43,14 +43,14 @@ from vlnce_baselines.common.env_utils import (
     construct_envs_auto_reset_false,
     SimpleRLEnv
 )
-from vlnce_baselines.common.utils import transform_obs
+from vlnce_baselines.common.utils import transform_obs, repackage_hidden, split_batch_tbptt, repackage_mini_batch
 from vlnce_baselines.models.cma_policy import CMAPolicy
 from vlnce_baselines.models.seq2seq_sem_attn import Seq2Seq_Sem_Attn_Policy
 from vlnce_baselines.models.seq2seq_policy import Seq2SeqPolicy
 from vlnce_baselines.models.seq2seq_text_attn import Seq2Seq_Lang_Attn
 from vlnce_baselines.models.seq2seq_sem_text_attn import Seq2Seq_Sem_Text_Attn
 from vlnce_baselines.models.hybrid_cma_mp import TransformerHybridPolicy
-from vlnce_baselines.common.environments import VLNCEDaggerEnv
+from vlnce_baselines.models.seq2seq import Seq2SeqNet
 
 
 with warnings.catch_warnings():
@@ -85,6 +85,13 @@ def collate_fn(batch):
         
         pad = torch.full_like(t[0:1], fill_val).expand(pad_amount, *t.size()[1:])
         return torch.cat([t, pad], dim=0)
+    
+    def _pad_instruction(t, max_len, fill_val=0):
+        pad_amount = max_len - t.size(1)
+        if pad_amount == 0:
+            return t
+        pad = torch.full_like(t[:,0], fill_val).expand(*t.size()[:1], pad_amount)
+        return torch.cat([t, pad], dim=1)
 
     transposed = list(zip(*batch))
 
@@ -106,22 +113,26 @@ def collate_fn(batch):
     observations_batch = new_observations_batch
 
     max_traj_len = max(ele.size(0) for ele in prev_actions_batch)
+    max_insr_len = max(ele.size(1) for ele in observations_batch['instruction'])
     for bid in range(B):
         for sensor in observations_batch:
-            if sensor == 'instruction':
+            if sensor == 'instruction':  
+                observations_batch[sensor][bid] = _pad_instruction(
+                    observations_batch[sensor][bid], max_insr_len, fill_val=0.0
+                )
                 continue
             observations_batch[sensor][bid] = _pad_helper(
                 observations_batch[sensor][bid], max_traj_len, fill_val=0.0
             )
         prev_actions_batch[bid] = _pad_helper(prev_actions_batch[bid], max_traj_len)
         corrected_actions_batch[bid] = _pad_helper(
-            corrected_actions_batch[bid], max_traj_len, fill_val=-1.0
+            corrected_actions_batch[bid], max_traj_len, fill_val=0.0
         )
 #         weights_batch[bid] = _pad_helper(weights_batch[bid], max_traj_len)
     
 
     for sensor in observations_batch:
-        observations_batch[sensor] = torch.stack(observations_batch[sensor], dim=0)
+        observations_batch[sensor] = torch.stack(observations_batch[sensor], dim=1)
         observations_batch[sensor] = observations_batch[sensor].transpose(1,0)
         observations_batch[sensor] = observations_batch[sensor].contiguous().view(
             -1, *observations_batch[sensor].size()[2:]
@@ -144,8 +155,15 @@ def collate_fn(batch):
         observations_batch,
         prev_actions_batch.contiguous().view(-1, 2),
         not_done_masks.contiguous().view(-1, 2),
-        corrected_actions_batch.squeeze(2),
+        corrected_actions_batch.contiguous().view(-1,2),
     )
+
+    # return (
+    #     observations_batch,
+    #     prev_actions_batch,
+    #     not_done_masks,
+    #     corrected_actions_batch,
+    # )
 
 
 def _block_shuffle(lst, block_size):
@@ -163,6 +181,7 @@ class IWTrajectoryDataset(torch.utils.data.IterableDataset):
         inflection_weight_coef=1.0,
         lmdb_map_size=1e9,
         batch_size=1,
+        is_bert=False
     ):
         super().__init__()
         self.lmdb_features_dir = lmdb_features_dir
@@ -170,6 +189,7 @@ class IWTrajectoryDataset(torch.utils.data.IterableDataset):
         self.preload_size = batch_size * 100
         self._preload = []
         self.batch_size = batch_size
+        self.is_bert = is_bert
 
         if use_iw:
             self.inflec_weights = torch.tensor([1.0, inflection_weight_coef])
@@ -222,9 +242,20 @@ class IWTrajectoryDataset(torch.utils.data.IterableDataset):
 
     def __next__(self):
         obs, prev_actions, oracle_actions= self._load_next()
-        instruction_batch = obs['instruction'][0]
-        instruction_batch = np.expand_dims(instruction_batch, axis=0)
-        obs['instruction'] = instruction_batch
+
+        if self.is_bert:            
+            instruction_batch = obs['instruction'][0]
+            instruction_batch = np.expand_dims(instruction_batch, axis=0)
+            obs['instruction'] = instruction_batch
+            del obs['glove_tokens']
+        else:
+            instruction_batch = obs['glove_tokens'][0]
+            instruction_batch = np.expand_dims(instruction_batch, axis=0)
+            obs['instruction'] = instruction_batch
+            del obs['glove_tokens']
+        # instruction_batch = obs['instruction'][0]
+        # instruction_batch = np.expand_dims(instruction_batch, axis=0)
+        # obs['instruction'] = instruction_batch
         for k, v in obs.items():
             obs[k] = torch.from_numpy(v)
 
@@ -232,13 +263,6 @@ class IWTrajectoryDataset(torch.utils.data.IterableDataset):
         
         
         oracle_actions = torch.from_numpy(oracle_actions)
-
-#         inflections = torch.cat(
-#             [
-#                 torch.tensor([1], dtype=torch.long),
-#                 (oracle_actions[1:] != oracle_actions[:-1]).long(),
-#             ]
-#         )
         return (obs, prev_actions, oracle_actions)
 
     def __iter__(self):
@@ -260,7 +284,7 @@ class IWTrajectoryDataset(torch.utils.data.IterableDataset):
         return self
 
 
-@baseline_registry.register_trainer(name="robo_dagger")
+@baseline_registry.register_trainer(name="robo_vln_trainer")
 class RoboDaggerTrainer(BaseRLTrainer):
     def __init__(self, config=None):
         super().__init__(config)
@@ -325,24 +349,25 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 gpus = [0,1,2]
             )
         else:
-            self.actor_critic = Seq2SeqPolicy(
+            self.actor_critic = Seq2SeqNet(
                 observation_space=self.envs.observation_space,
-                action_space=self.envs.action_space,
+                num_actions=2,
                 model_config=config,
+                batch_size = self.config.DAGGER.BATCH_SIZE,
             )
 
         if not self.config.MODEL.TRANSFORMER.split_gpus:
             self.actor_critic.to(self.device)    
 
-        # self.optimizer = torch.optim.Adam(
-        #     self.actor_critic.parameters(), lr=self.config.DAGGER.LR
-        # )
+        self.optimizer = torch.optim.Adam(
+            self.actor_critic.parameters(), lr=self.config.DAGGER.LR
+        )
 
-        self.optimizer = torch.optim.AdamW(self.actor_critic.parameters(), 
-                                    lr=self.config.MODEL.TRANSFORMER.lr, 
-                                    weight_decay=self.config.MODEL.TRANSFORMER.weight_decay)
+        # self.optimizer = torch.optim.AdamW(self.actor_critic.parameters(), 
+        #                             lr=self.config.MODEL.TRANSFORMER.lr, 
+        #                             weight_decay=self.config.MODEL.TRANSFORMER.weight_decay)
 
-        self.scheduler = torch.optim.lr_scheduler.CyclicLR(self.optimizer, base_lr=2e-6, max_lr=1e-4, step_size_up=1000,step_size_down=50000, cycle_momentum=False)
+        # self.scheduler = torch.optim.lr_scheduler.CyclicLR(self.optimizer, base_lr=2e-6, max_lr=1e-4, step_size_up=1000,step_size_down=50000, cycle_momentum=False)
         if load_from_ckpt:
             ckpt_dict = self.load_checkpoint(ckpt_path, map_location="cpu")
             self.actor_critic.load_state_dict(ckpt_dict["state_dict"])
@@ -382,8 +407,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
             with torch.cuda.device(self.device):
                 torch.cuda.empty_cache()
 
-        if self.envs is None:
-            self.envs = construct_envs_auto_reset_false(self.config, get_env_class(self.config.ENV_NAME))
+        # if self.envs is None:
+        #     self.envs = construct_envs_auto_reset_false(self.config, get_env_class(self.config.ENV_NAME))
 
         prev_actions = np.zeros((1,2))
         done = False
@@ -399,6 +424,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
             start_id = lmdb_env.stat()["entries"]
             txn = lmdb_env.begin(write=True)
 
+            # episodes = []
             for episode in range(self.config.DAGGER.UPDATE_SIZE):
                 episode = []
                 observations = self.envs.reset()
@@ -413,10 +439,9 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 self.envs.habitat_env._sim, reference_path, waypoint_threshold=0.4)
 
                 done = False
-
-                start_time = time.time()
-                print("start time:", time)
                 while continuous_path_follower.progress < 1.0:
+                    if done:
+                        break
                     continuous_path_follower.update_waypoint()
                     agent_state = self.envs.habitat_env._sim.get_agent_state()
                     previous_rigid_state = habitat_sim.RigidState(
@@ -439,15 +464,15 @@ class RoboDaggerTrainer(BaseRLTrainer):
                             observations,
                             prev_actions,
                             actions,
+
                         )
                     )
                     prev_actions = actions
 
-                print("end time:", time.time()-start_time)
+                # episodes.append(episode)
+
                 # Save episode to LMDB directory
                 traj_obs = batch_obs([step[0] for step in episode],  device=torch.device("cpu"))
-                del traj_obs["vln_oracle_action_sensor"]
-
                 for k, v in traj_obs.items():
                     traj_obs[k] = v.numpy()
                 transposed_ep = [
@@ -462,6 +487,30 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
                 pbar.update()
                 collected_eps += 1
+
+                # if (
+                #     collected_eps % self.config.DAGGER.LMDB_STORE_FREQUENCY
+                # ) == 0:
+                #     for episode in episodes:
+                #         # Save episode to LMDB directory
+                #         traj_obs = batch_obs([step[0] for step in episode],  device=torch.device("cpu"))
+                #         del traj_obs["vln_oracle_action_sensor"]
+
+                #         for k, v in traj_obs.items():
+                #             traj_obs[k] = v.numpy()
+                #         transposed_ep = [
+                #             traj_obs,
+                #             np.array([step[1] for step in episode], dtype=float),
+                #             np.array([step[2] for step in episode], dtype=float),
+                #         ]
+                #         txn.put(
+                #             str(start_id + collected_eps).encode(),
+                #             msgpack_numpy.packb(transposed_ep, use_bin_type=True),
+                #         )
+
+                #         pbar.update()
+                #         collected_eps += 1
+                #         episodes =[]
 
                 if (
                     collected_eps % self.config.DAGGER.LMDB_COMMIT_FREQUENCY
@@ -674,41 +723,48 @@ class RoboDaggerTrainer(BaseRLTrainer):
     #         depth_hook.remove()
 
     def _update_agent(
-        self, observations, prev_actions, not_done_masks, corrected_actions
+        self, observations, prev_actions, not_done_masks, corrected_actions, recurrent_hidden_states
     ):
-        T, N, C = corrected_actions.size()
-
-        print(T,N,C)
+        # T, N, C = corrected_actions.size()
         self.optimizer.zero_grad()
 
         criterion = nn.MSELoss()
         # recurrent_hidden_states =[]
-        recurrent_hidden_states = torch.zeros(
-            self.actor_critic.net.state_encoder.num_recurrent_layers,
-            T,
-            self.config.MODEL.STATE_ENCODER.hidden_size,
-            device=self.device,
-        )
+        # recurrent_hidden_states = torch.zeros(
+        #     self.actor_critic.state_encoder.num_recurrent_layers,
+        #     T,
+        #     self.config.MODEL.STATE_ENCODER.hidden_size,
+        #     device=self.device,
+        # )
 
         AuxLosses.clear()
 
-        distribution = self.actor_critic.build_distribution(
-            observations, recurrent_hidden_states, prev_actions, not_done_masks
-        )
+        recurrent_hidden_states = repackage_hidden(recurrent_hidden_states)
 
-        logits = distribution.logits.to(dtype=torch.float)
+        batch = (observations, recurrent_hidden_states, prev_actions, not_done_masks)
+        del observations, recurrent_hidden_states, prev_actions, not_done_masks
+        gc.collect()
+        output, recurrent_hidden_states = self.actor_critic(batch)
+        # distribution = self.actor_critic.build_distribution(
+        #     observations, recurrent_hidden_states, prev_actions, not_done_masks
+        # )
 
-        print(logits.shape)
+        action_mask = corrected_actions==0
+        output = output.masked_fill_(action_mask, 0)
+        output = output.to(dtype=torch.float)
+        corrected_actions = corrected_actions.to(dtype=torch.float)
+
+        # print(logits.shape)
         # logits = logits.view(T, N, -1)
-        corrected_actions = corrected_actions.contiguous().view(T*N, C).to(dtype=torch.float)
-        print(corrected_actions.shape)
+        # corrected_actions = corrected_actions.contiguous().view(T*N, C).to(dtype=torch.float)
+        # print(corrected_actions.shape)
         # action_loss = F.cross_entropy(
         #     logits.permute(0, 2, 1), corrected_actions, reduction="none"
         # )
         # action_loss = F.cross_entropy(
         #     logits, corrected_actions, reduction="none"
         # )
-        action_loss = criterion(logits, corrected_actions)
+        action_loss = criterion(output, corrected_actions)
         # action_loss = action_loss.view(T, N)
         # action_loss = ((weights * action_loss).sum(0) / weights.sum(0)).mean()
 
@@ -729,16 +785,17 @@ class RoboDaggerTrainer(BaseRLTrainer):
         #     except:
         #         pass
 
-        loss_data = action_loss.item()
+        loss_data = action_loss.detach()
+
+        gc.collect()
         # if isinstance(aux_loss, torch.Tensor):
         #     aux_loss_data = aux_loss.item()
         # else:
         #     aux_loss_data = aux_loss
 
         aux_loss_data =0
-        del distribution, logits, action_loss
-
-        return loss_data, aux_loss_data
+        del output, action_loss
+        return loss_data, aux_loss_data, recurrent_hidden_states
 
     def train(self) -> None:
         r"""Main method for training DAgger.
@@ -829,6 +886,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     inflection_weight_coef=self.config.MODEL.inflection_weight_coef,
                     lmdb_map_size=self.config.DAGGER.LMDB_MAP_SIZE,
                     batch_size=self.config.DAGGER.BATCH_SIZE,
+                    is_bert = self.config.MODEL.INSTRUCTION_ENCODER.is_bert,
                 )
                 diter = torch.utils.data.DataLoader(
                     dataset,
@@ -846,72 +904,97 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     for batch in tqdm.tqdm(
                         diter, total=dataset.length // dataset.batch_size, leave=False
                     ):
-                        (
-                            observations_batch,
+
+                        (   observations_batch,
                             prev_actions_batch,
                             not_done_masks,
                             corrected_actions_batch,
                         ) = batch
 
-                        if 'semantic' in observations_batch:
-                            del observations_batch['semantic']
-                        observations_batch = {
-                            k: v.to(device=self.device, non_blocking=True)
-                            for k, v in observations_batch.items()
-                        }
-                        try:
-                            loss, aux_loss = self._update_agent(
-                                observations_batch,
-                                prev_actions_batch.to(
-                                    device=self.device, non_blocking=True
-                                ),
-                                not_done_masks.to(
-                                    device=self.device, non_blocking=True
-                                ),
-                                corrected_actions_batch.to(
-                                    device=self.device, non_blocking=True
-                                ),
-                            )
-                        except:
-                            logger.info(
-                                "ERROR: failed to update agent. Updating agent with batch size of 1."
-                            )
-                            loss, action_loss, aux_loss = 0, 0, 0
-                            prev_actions_batch = prev_actions_batch.cpu()
-                            not_done_masks = not_done_masks.cpu()
-                            corrected_actions_batch = corrected_actions_batch.cpu()
-                            weights_batch = weights_batch.cpu()
+                        recurrent_hidden_states = torch.zeros(
+                            self.actor_critic.state_encoder.num_recurrent_layers,
+                            self.config.DAGGER.BATCH_SIZE,
+                            self.config.MODEL.STATE_ENCODER.hidden_size,
+                            device=self.device,
+                        )
+
+                        batch_split = split_batch_tbptt(observations_batch, prev_actions_batch, not_done_masks, 
+                                                        corrected_actions_batch, self.config.DAGGER.tbptt_steps, 
+                                                        self.config.DAGGER.split_dim)
+
+                        del observations_batch, prev_actions_batch, not_done_masks, corrected_actions_batch, batch
+                        
+                        for split in batch_split:
+                            (   observations_batch,
+                                prev_actions_batch,
+                                not_done_masks,
+                                corrected_actions_batch,
+                            ) = split                        
+                        # for split in batch_split:
+                        #     (   observations_batch,
+                        #         prev_actions_batch,
+                        #         not_done_masks,
+                        #         corrected_actions_batch,
+                        #     ) = repackage_mini_batch(split)
+
                             observations_batch = {
-                                k: v.cpu() for k, v in observations_batch.items()
+                                k: v.to(device=self.device, non_blocking=True)
+                                for k, v in observations_batch.items()
                             }
-
-                            for i in range(not_done_masks.size(0)):
-                                output = self._update_agent(
-                                    {
-                                        k: v[i].to(
-                                            device=self.device, non_blocking=True
-                                        )
-                                        for k, v in observations_batch.items()
-                                    },
-                                    prev_actions_batch[i].to(
+                            try:
+                                loss, aux_loss, recurrent_hidden_states= self._update_agent(
+                                    observations_batch,
+                                    prev_actions_batch.to(
                                         device=self.device, non_blocking=True
                                     ),
-                                    not_done_masks[i].to(
+                                    not_done_masks.to(
                                         device=self.device, non_blocking=True
                                     ),
-                                    corrected_actions_batch[i].to(
+                                    corrected_actions_batch.to(
                                         device=self.device, non_blocking=True
                                     ),
-                                    weights_batch[i].to(
-                                        device=self.device, non_blocking=True
-                                    ),
+                                    recurrent_hidden_states,
                                 )
-                                loss += output[0]
-                                action_loss += output[1]
-                                aux_loss += output[2]
+                            except:
+                                logger.info(
+                                    "ERROR: failed to update agent. Updating agent with batch size of 1."
+                                )
+                                loss, action_loss, aux_loss = 0, 0, 0
+                                prev_actions_batch = prev_actions_batch.cpu()
+                                not_done_masks = not_done_masks.cpu()
+                                corrected_actions_batch = corrected_actions_batch.cpu()
+                                weights_batch = weights_batch.cpu()
+                                observations_batch = {
+                                    k: v.cpu() for k, v in observations_batch.items()
+                                }
 
-                        # For CyclicalLR
-                        self.scheduler.step()
+                                for i in range(not_done_masks.size(0)):
+                                    output = self._update_agent(
+                                        {
+                                            k: v[i].to(
+                                                device=self.device, non_blocking=True
+                                            )
+                                            for k, v in observations_batch.items()
+                                        },
+                                        prev_actions_batch[i].to(
+                                            device=self.device, non_blocking=True
+                                        ),
+                                        not_done_masks[i].to(
+                                            device=self.device, non_blocking=True
+                                        ),
+                                        corrected_actions_batch[i].to(
+                                            device=self.device, non_blocking=True
+                                        ),
+                                        weights_batch[i].to(
+                                            device=self.device, non_blocking=True
+                                        ),
+                                    )
+                                    loss += output[0]
+                                    action_loss += output[1]
+                                    aux_loss += output[2]
+
+                            # # For CyclicalLR
+                            # self.scheduler.step()
 
                         logger.info(f"train_loss: {loss}")
                         # logger.info(f"train_action_loss: {action_loss}")
@@ -923,8 +1006,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         #     f"train_action_loss_iter_{dagger_it}", action_loss, step_id
                         # )
 
-                        # h1 = nvmlDeviceGetHandleByIndex(0)
-                        # info1 = nvmlDeviceGetMemoryInfo(h1)
+                        h1 = nvmlDeviceGetHandleByIndex(0)
+                        info1 = nvmlDeviceGetMemoryInfo(h1)
 
                         # h2 = nvmlDeviceGetHandleByIndex(1)
                         # info2 = nvmlDeviceGetMemoryInfo(h2)
@@ -934,18 +1017,18 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         writer.add_scalar(
                             f"train_aux_loss_iter_{dagger_it}", aux_loss, step_id
                         )
-                        # writer.add_scalar(
-                        #     f"GPU_0_mem_usage_{dagger_it}", info1.used, step_id
-                        # )
+                        writer.add_scalar(
+                            f"GPU_0_mem_usage_{dagger_it}", info1.used, step_id
+                        )
                         # writer.add_scalar(
                         #     f"GPU_1_mem_usage_{dagger_it}", info2.used, step_id
                         # )
                         # writer.add_scalar(
                         #     f"GPU_2_mem_usage_{dagger_it}", info3.used, step_id
                         # )
-                        # writer.add_scalar(
-                        #     f"Cache_0_mem_usage_{dagger_it}", torch.cuda.memory_cached(0), step_id
-                        # )
+                        writer.add_scalar(
+                            f"Cache_0_mem_usage_{dagger_it}", torch.cuda.memory_cached(0), step_id
+                        )
                         # writer.add_scalar(
                         #     f"Cache_1_mem_usage_{dagger_it}", torch.cuda.memory_cached(1), step_id
                         # )
@@ -955,7 +1038,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         del loss
                         # torch.cuda.empty_cache() 
                         step_id += 1
-                        end = time.time()
+                        # end = time.time()
 
                     self.save_checkpoint(
                         f"ckpt.{dagger_it * self.config.DAGGER.EPOCHS + epoch}.pth"

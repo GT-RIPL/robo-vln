@@ -104,10 +104,13 @@ class LanguageEncoder(nn.Module):
             lengths: [batch_size]
             hidden_state: [batch_size x hidden_size]
         """
-        instruction = observations["instruction"].long()
+
+        instruction = observations
+        # instruction = observations["instruction"].long()
         # instruction = observations["instruction_batch"]
 
         lengths = (instruction != 0.0).long().sum(dim=1)
+        # lengths = (instruction != 0.0).long().sum(dim=1)
 
         if self.config.is_bert:
             self.embedding_layer.eval()
@@ -119,14 +122,16 @@ class LanguageEncoder(nn.Module):
         # print("Embedded shape:",embedded.shape)
         # batch_size = observations["instruction"].shape[0]
         embedded = self.drop(embedded)
-        batch_size = observations["instruction"].shape[0]
-        h0, c0 = self._init_state(batch_size)
+        # batch_size = self.batch_size
+        # batch_size = observations["instruction"].shape[0]
+        # h0, c0 = self._init_state(batch_size)
 
         packed_seq = nn.utils.rnn.pack_padded_sequence(
             embedded, lengths, batch_first=True, enforce_sorted=False
         )
 
-        output, hidden = self.encoder_rnn(packed_seq, (h0,c0))
+        # output, hidden = self.encoder_rnn(packed_seq, (h0,c0))
+        output, hidden = self.encoder_rnn(packed_seq)
 
         # if self.config.rnn_type == "LSTM":
         #     final_state = final_state[0]

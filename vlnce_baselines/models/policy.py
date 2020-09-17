@@ -13,6 +13,7 @@ class BasePolicy(Policy):
         features, rnn_hidden_states = self.net(
             observations, rnn_hidden_states, prev_actions, masks
         )
+        del rnn_hidden_states
         distribution = self.action_distribution(features)
 
         return distribution
