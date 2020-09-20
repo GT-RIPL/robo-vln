@@ -9,6 +9,11 @@ from tokenizers import (ByteLevelBPETokenizer,
                             BertWordPieceTokenizer)
 
 import os
+import numpy as np
+
+from collections import defaultdict
+from typing import Dict, List, Optional
+import numpy as np
 os.environ["TOKENIZERS_PARALLELISM"] = "True"
 
 
@@ -20,6 +25,42 @@ def get_bert_tokens(sentence, max_seq_length, tokenizer):
     #     padded_tokens = tokens + ['[PAD]' for _ in range(max_seq_length - len(tokens))]
     # token_ids = tokenizer.convert_tokens_to_ids(padded_tokens)
     return output.ids
+
+def _to_tensor(v) -> torch.Tensor:
+    if torch.is_tensor(v):
+        return v
+    elif isinstance(v, np.ndarray):
+        return torch.from_numpy(v)
+    else:
+        return torch.tensor(v, dtype=torch.float)
+
+def batch_obs(
+    observations: List[Dict], device: Optional[torch.device] = None
+) -> Dict[str, torch.Tensor]:
+    r"""Transpose a batch of observation dicts to a dict of batched
+    observations.
+
+    Args:
+        observations:  list of dicts of observations.
+        device: The torch.device to put the resulting tensors on.
+            Will not move the tensors if None
+
+    Returns:
+        transposed dict of lists of observations.
+    """
+    batch = defaultdict(list)
+
+    for sensor in observations:
+        batch[sensor].append(_to_tensor(observations[sensor]))
+
+    for sensor in batch:
+        batch[sensor] = (
+            torch.stack(batch[sensor], dim=0)
+            .to(device=device)
+            .to(dtype=torch.float)
+        )
+
+    return batch
 
 def transform_obs(
     observations: Dict, instruction_sensor_uuid: str, is_bert = False, max_seq_length = 200
@@ -42,7 +83,11 @@ def transform_obs(
     tokenizer = BertWordPieceTokenizer("vocab_files/bert-base-uncased-vocab.txt", lowercase=True)
     # tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     if is_bert:
+        # observations[instruction_sensor_uuid] = observations[
+        #     instruction_sensor_uuid
+        # ]["tokens"]
         observations['glove_tokens'] = observations[instruction_sensor_uuid]["tokens"]
+
         instruction = observations[
             instruction_sensor_uuid
         ]["text"]

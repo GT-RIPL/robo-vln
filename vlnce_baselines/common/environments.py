@@ -26,10 +26,15 @@ class VLNCEDaggerEnv(habitat.RLEnv):
         distance = self._env.sim.geodesic_distance(current_position, target_position)
         return distance
 
+    # def get_done(self, observations):
+    #     episode_success = (
+    #         self._env.task.is_stop_called
+    #         and self._distance_target() < self._success_distance
+    #     )
+    #     return self._env.episode_over or episode_success
+
     def get_done(self, observations):
-        episode_success = (
-            self._env.task.is_stop_called
-            and self._distance_target() < self._success_distance
+        episode_success = (self._distance_target() < self._success_distance
         )
         return self._env.episode_over or episode_success
 

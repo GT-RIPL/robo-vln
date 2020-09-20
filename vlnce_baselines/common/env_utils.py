@@ -70,10 +70,16 @@ def construct_env(
         task_config.defrost()
         if len(scenes) > 0:
             task_config.DATASET.CONTENT_SCENES = scene_splits[i]
-
+        
         task_config.SIMULATOR.HABITAT_SIM_V0.GPU_DEVICE_ID = (
             config.SIMULATOR_GPU_ID[i % len(config.SIMULATOR_GPU_ID)]
         )
+
+        logger.info(
+            f"Simulator GPU ID {config.SIMULATOR_GPU_ID}")
+
+        logger.info(
+            f"Simulator GPU ID {task_config.SIMULATOR.HABITAT_SIM_V0.GPU_DEVICE_ID}")
         task_config.SIMULATOR.AGENT_0.SENSORS = config.SENSORS
         task_config.freeze()
 

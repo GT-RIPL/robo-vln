@@ -146,9 +146,15 @@ class Success(Measure):
             current_position, episode.goals[0].position
         )
 
+        # self._metric = (
+        #     hasattr(task, "is_stop_called")
+        #     and task.is_stop_called
+        #     and distance_to_target < self._config.SUCCESS_DISTANCE
+        # )
+
         self._metric = (
             hasattr(task, "is_stop_called")
-            and task.is_stop_called
+            # and task.is_stop_called
             and distance_to_target < self._config.SUCCESS_DISTANCE
         )
 

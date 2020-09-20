@@ -12,7 +12,8 @@ import scipy.misc
 import time
 import habitat_sim
 import gc
-import time 
+import time
+import magnum as mn 
 
 from habitat_sim.utils.common import quat_to_magnum
 
@@ -29,7 +30,7 @@ from habitat_baselines.common.base_trainer import BaseRLTrainer
 from habitat_baselines.common.baseline_registry import baseline_registry
 from habitat_baselines.common.environments import get_env_class
 from habitat_baselines.common.tensorboard_utils import TensorboardWriter
-from habitat_baselines.common.utils import batch_obs, generate_video
+from habitat_baselines.common.utils import generate_video
 from vlnce_baselines.common.continuous_path_follower import (
     ContinuousPathFollower,
     track_waypoint
@@ -43,7 +44,7 @@ from vlnce_baselines.common.env_utils import (
     construct_envs_auto_reset_false,
     SimpleRLEnv
 )
-from vlnce_baselines.common.utils import transform_obs, repackage_hidden, split_batch_tbptt, repackage_mini_batch
+from vlnce_baselines.common.utils import transform_obs, batch_obs, repackage_hidden, split_batch_tbptt, repackage_mini_batch
 from vlnce_baselines.models.cma_policy import CMAPolicy
 from vlnce_baselines.models.seq2seq_sem_attn import Seq2Seq_Sem_Attn_Policy
 from vlnce_baselines.models.seq2seq_policy import Seq2SeqPolicy
@@ -247,7 +248,7 @@ class IWTrajectoryDataset(torch.utils.data.IterableDataset):
             instruction_batch = obs['instruction'][0]
             instruction_batch = np.expand_dims(instruction_batch, axis=0)
             obs['instruction'] = instruction_batch
-            del obs['glove_tokens']
+            # del obs['glove_tokens']
         else:
             instruction_batch = obs['glove_tokens'][0]
             instruction_batch = np.expand_dims(instruction_batch, axis=0)
@@ -418,9 +419,12 @@ class RoboDaggerTrainer(BaseRLTrainer):
         vel_control.controlling_ang_vel = True
         vel_control.ang_vel_is_local = True
         collected_eps = 0
+        # with tqdm.tqdm(total=self.config.DAGGER.UPDATE_SIZE) as pbar, torch.no_grad():
         with tqdm.tqdm(total=self.config.DAGGER.UPDATE_SIZE) as pbar, lmdb.open(
             self.lmdb_features_dir, map_size=int(self.config.DAGGER.LMDB_MAP_SIZE)
         ) as lmdb_env, torch.no_grad():
+
+
             start_id = lmdb_env.stat()["entries"]
             txn = lmdb_env.begin(write=True)
 
@@ -1110,9 +1114,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         config.freeze()
 
         # setup agent
-        self.envs = construct_envs_auto_reset_false(
-            config, get_env_class(config.ENV_NAME)
-        )
+        self.envs =  construct_env(self.config)
         self.device = (
             torch.device("cuda", config.TORCH_GPU_ID)
             if torch.cuda.is_available()
@@ -1121,25 +1123,42 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
         self._setup_actor_critic_agent(config.MODEL, True, checkpoint_path)
 
+        vc = habitat_sim.physics.VelocityControl()
+        vc.controlling_lin_vel = True
+        vc.lin_vel_is_local = True
+        vc.controlling_ang_vel = True
+        vc.ang_vel_is_local = True
+
         observations = self.envs.reset()
         observations = transform_obs(
             observations, config.TASK_CONFIG.TASK.INSTRUCTION_SENSOR_UUID, is_bert=self.config.MODEL.INSTRUCTION_ENCODER.is_bert
         )
-        batch = batch_obs(observations, self.device)
+
+        # observations = {
+        #     k: torch.tensor(v).to(device=self.device, non_blocking=True)
+        #     for k, v in observations.items()
+        # }
+        observations = batch_obs(observations, self.device)
         # batch["instruction_batch"] = batch['instruction']
         # del batch['instruction']
 
-        eval_recurrent_hidden_states = []
-        prev_actions = torch.zeros(
-            config.NUM_PROCESSES, 1, device=self.device, dtype=torch.long
+        eval_recurrent_hidden_states = torch.zeros(
+            self.actor_critic.state_encoder.num_recurrent_layers,
+            self.config.NUM_PROCESSES,
+            self.config.MODEL.STATE_ENCODER.hidden_size,
+            device=self.device,
         )
-        not_done_masks = torch.zeros(config.NUM_PROCESSES, 1, device=self.device)
+        prev_actions = torch.zeros(
+            config.NUM_PROCESSES, 2, device=self.device, dtype=torch.long
+        )
+        not_done_masks = torch.zeros(config.NUM_PROCESSES, 2, device=self.device)
 
         stats_episodes = {}  # dict of dicts that stores stats per episode
 
         if len(config.VIDEO_OPTION) > 0:
+            rgb_frames = []
             os.makedirs(config.VIDEO_DIR, exist_ok=True)
-            rgb_frames = [[] for _ in range(config.NUM_PROCESSES)]
+            # rgb_frames = [[] for _ in range(config.NUM_PROCESSES)]
 
         if config.PLOT_ATTENTION:
             attention_weights = [[] for _ in range(config.NUM_PROCESSES)]
@@ -1149,97 +1168,116 @@ class RoboDaggerTrainer(BaseRLTrainer):
         k=0
         ep_count = 0
         min_2nd_dim = 1000
+        steps=0
         while (
-            self.envs.num_envs > 0 and len(stats_episodes) < config.EVAL.EPISODE_COUNT
+            len(stats_episodes) < config.EVAL.EPISODE_COUNT
         ):
-            current_episodes = self.envs.current_episodes()
+            current_episode = self.envs.habitat_env.current_episode
             # print("Number of episodes:", self.envs.number_of_episodes)
             # print("Number of envs:", self.envs.num_envs)
             # # print("Count episodes:", self.envs.count_episodes)
             # print("--------------------------------------------")
             with torch.no_grad():
-                (_, actions, _, eval_recurrent_hidden_states) = self.actor_critic.act(
-                    batch,
-                    eval_recurrent_hidden_states,
-                    prev_actions,
-                    not_done_masks,
-                    deterministic=True,
-                )
-                prev_actions.copy_(actions)
+
+                batch = (observations, eval_recurrent_hidden_states, prev_actions, not_done_masks)
+                gc.collect()
+                output, eval_recurrent_hidden_states = self.actor_critic(batch)
+                # (_, actions, _, eval_recurrent_hidden_states) = self.actor_critic.act(
+                #     batch,
+                #     eval_recurrent_hidden_states,
+                #     prev_actions,
+                #     not_done_masks,
+                #     deterministic=True,
+                # )
+                prev_actions = output
+
+            not_done_masks = torch.ones(config.NUM_PROCESSES, 2, device=self.device)
 
             # print("Loop:", k, "hidden states shape:", eval_recurrent_hidden_states.shape)
 
-            outputs = self.envs.step([a[0].item() for a in actions])
-            observations, _, dones, infos = [list(x) for x in zip(*outputs)]
+            # print("output",output)
+            # print("output.shape",output.shape)
+            # print("v", output[:,0])
+            vc.linear_velocity = mn.Vector3(0, 0, output[:,0].cpu().numpy())
+            max_turn_speed = 1.0
+            vc.angular_velocity = mn.Vector3(0, np.clip(output[:,1].cpu().numpy(), -max_turn_speed, max_turn_speed), 0)
+            observations, _, done, info = self.envs.step(vc)
 
+            steps+=1
+
+            if len(config.VIDEO_OPTION) > 0:
+                frame = observations_to_image(observations, info)
+                frame = append_text_to_image(
+                    frame, current_episode.instruction.instruction_text
+                )
+                rgb_frames.append(frame)
             # print("dones",dones, "\n")
             # print("not_done_masks", not_done_masks)
 
-            not_done_masks = torch.tensor(
-                [[0.0] if done else [1.0] for done in dones],
-                dtype=torch.float,
-                device=self.device,
-            )
+            # not_done_masks = torch.tensor(
+            #     [[0.0] if done else [1.0] for done in dones],
+            #     dtype=torch.float,
+            #     device=self.device,
+            # )
             # reset envs and observations if necessary
 
             # for i in range(self.envs.num_envs):
                 # print("loop number", k)
                 # print("current episode",self.envs.current_episodes()[i].episode_id)
                 # print("------------------------------------------------")
-            for i in range(self.envs.num_envs):
-                if config.PLOT_ATTENTION:
-                    attention_weights[i].append(batch['lang_attention'][i])
-                    min_dim = batch['lang_attention'][i].shape[1]
-                    min_2nd_dim = np.minimum(min_2nd_dim,min_dim)
-                    save_actions[i].append(actions[i])
-                if len(config.VIDEO_OPTION) > 0:
+            # for i in range(self.envs.num_envs):
+            #     if config.PLOT_ATTENTION:
+            #         attention_weights[i].append(batch['lang_attention'][i])
+            #         min_dim = batch['lang_attention'][i].shape[1]
+            #         min_2nd_dim = np.minimum(min_2nd_dim,min_dim)
+            #         save_actions[i].append(actions[i])
+            #     if len(config.VIDEO_OPTION) > 0:
 
-                    frame = observations_to_image(observations[i], infos[i])
-                    frame = append_text_to_image(
-                        frame, current_episodes[i].instruction.instruction_text
-                    )
-                    rgb_frames[i].append(frame)
+            #         frame = observations_to_image(observations[i], infos[i])
+            #         frame = append_text_to_image(
+            #             frame, current_episodes[i].instruction.instruction_text
+            #         )
+            #         rgb_frames[i].append(frame)
 
-                if not dones[i]:
-                    continue
+            if done or steps==self.config.TASK_CONFIG.ENVIRONMENT.MAX_EPISODE_STEPS:
                 ep_count+=1
-                print("dones:", dones)
-                stats_episodes[current_episodes[i].episode_id] = infos[i]
+                steps=0
+                print("dones:", done)
+                stats_episodes[current_episode.episode_id] = info
                 
-                print("Current episode ID:", current_episodes[i].episode_id)
+                print("Current episode ID:", current_episode.episode_id)
                 print("Episode Completed:", ep_count)
                 print(" Episode done---------------------------------------------")
-                observations[i] = self.envs.reset_at(i)[0]
-                prev_actions[i] = torch.zeros(1, dtype=torch.long)
-                eval_recurrent_hidden_states = []
-                not_done_masks = torch.zeros(config.NUM_PROCESSES, 1, device=self.device)
+                observations = self.envs.reset()
+                prev_actions = torch.zeros(
+                    config.NUM_PROCESSES, 2, device=self.device, dtype=torch.long
+                )
+                not_done_masks = torch.zeros(config.NUM_PROCESSES, 2, device=self.device)
 
-                # if len(dones)==1: # Last episode in the enviornment.Time to reset all episodes
-                #     # self.envs.resume_all()
-                #     observations = self.envs.reset()
-                #     eval_recurrent_hidden_states = []
-                #     prev_actions = torch.zeros(
-                #         config.NUM_PROCESSES, 1, device=self.device, dtype=torch.long
-                #     )
-                #     not_done_masks = torch.zeros(config.NUM_PROCESSES, 1, device=self.device)
-
+                eval_recurrent_hidden_states = torch.zeros(
+                    self.actor_critic.state_encoder.num_recurrent_layers,
+                    self.config.NUM_PROCESSES,
+                    self.config.MODEL.STATE_ENCODER.hidden_size,
+                    device=self.device,
+                )
                 metrics={"SPL":round(
-                            stats_episodes[current_episodes[i].episode_id]["spl"], 6
+                            stats_episodes[current_episode.episode_id]["spl"], 6
                         ) }  
                 if len(config.VIDEO_OPTION) > 0:
+                    time_step=30
                     generate_video(
                         video_option=config.VIDEO_OPTION,
                         video_dir=config.VIDEO_DIR,
-                        images=rgb_frames[i],
-                        episode_id=current_episodes[i].episode_id,
+                        images=rgb_frames,
+                        episode_id=current_episode.episode_id,
                         checkpoint_idx=checkpoint_index,
                         metrics=metrics,
                         tb_writer=writer,
+                        fps = int (1.0/time_step),
                     )
-                    del stats_episodes[current_episodes[i].episode_id]["top_down_map"]
-                    del stats_episodes[current_episodes[i].episode_id]["collisions"]
-                    rgb_frames[i] = []
-                del stats_episodes[current_episodes[i].episode_id]["top_down_map"]
+                    del stats_episodes[current_episode.episode_id]["top_down_map"]
+                    rgb_frames =[]
+                # del stats_episodes[current_episodes[i].episode_id]["top_down_map"]
                 if config.PLOT_ATTENTION:
                     for j in range(len(attention_weights[i])):
                         attention_weights[i][j] = attention_weights[i][j][:,:min_2nd_dim]
@@ -1254,45 +1292,37 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         )
                     attention_weights[i] = [] 
                     save_actions[i] =[]
-                    # for i in range(len(attention_weights)):
-                    #     attention_weights[i]= torch.cat(attention_weights[i], dim=0).cpu().numpy()
-                    #     print(attention_weights[i].shape)
-                    #     attention_to_image(
-                    #         image_dir = config.VIDEO_DIR,
-                    #         attention = attention_weights[i],
-                    #         episode_id=current_episodes[i].episode_id,
-                    #         checkpoint_idx=checkpoint_index,
-                    #         metrics=metrics,
-                    #         actions = save_actions[i]
-                    #     )
-                # else:                       
-                    # del stats_episodes[current_episodes[i].episode_id]["top_down_map"]
             observations = transform_obs(
                 observations, config.TASK_CONFIG.TASK.INSTRUCTION_SENSOR_UUID, is_bert=self.config.MODEL.INSTRUCTION_ENCODER.is_bert
             )
-            batch = batch_obs(observations, self.device)
+
+            # observations = {
+            #     k: torch.tensor(v).to(device=self.device, non_blocking=True)
+            #     for k, v in observations.items()
+            # }
+            observations = batch_obs(observations, self.device)
             k+=1
             envs_to_pause = []
-            next_episodes = self.envs.current_episodes()
+            next_episode = self.envs.habitat_env.current_episode
 
-            for i in range(self.envs.num_envs):
-                if next_episodes[i].episode_id in stats_episodes:
-                    envs_to_pause.append(i)
+            # for i in range(self.envs.num_envs):
+            #     if next_episodes[i].episode_id in stats_episodes:
+            #         envs_to_pause.append(i)
 
-            (
-                self.envs,
-                eval_recurrent_hidden_states,
-                not_done_masks,
-                prev_actions,
-                batch,
-            ) = self._pause_envs(
-                envs_to_pause,
-                self.envs,
-                eval_recurrent_hidden_states,
-                not_done_masks,
-                prev_actions,
-                batch,
-            )
+            # (
+            #     self.envs,
+            #     eval_recurrent_hidden_states,
+            #     not_done_masks,
+            #     prev_actions,
+            #     batch,
+            # ) = self._pause_envs(
+            #     envs_to_pause,
+            #     self.envs,
+            #     eval_recurrent_hidden_states,
+            #     not_done_masks,
+            #     prev_actions,
+            #     batch,
+            # )
 
         self.envs.close()
 
