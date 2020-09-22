@@ -34,6 +34,35 @@ def _to_tensor(v) -> torch.Tensor:
     else:
         return torch.tensor(v, dtype=torch.float)
 
+def batch_obs_data_collect(
+    observations: List[Dict], device: Optional[torch.device] = None
+) -> Dict[str, torch.Tensor]:
+    r"""Transpose a batch of observation dicts to a dict of batched
+    observations.
+
+    Args:
+        observations:  list of dicts of observations.
+        device: The torch.device to put the resulting tensors on.
+            Will not move the tensors if None
+
+    Returns:
+        transposed dict of lists of observations.
+    """
+    batch = defaultdict(list)
+
+    for obs in observations:
+        for sensor in obs:
+            batch[sensor].append(_to_tensor(obs[sensor]))
+
+    for sensor in batch:
+        batch[sensor] = (
+            torch.stack(batch[sensor], dim=0)
+            .to(device=device)
+            .to(dtype=torch.float)
+        )
+
+    return batch
+
 def batch_obs(
     observations: List[Dict], device: Optional[torch.device] = None
 ) -> Dict[str, torch.Tensor]:

@@ -36,7 +36,7 @@ class VLNCEDaggerEnv(habitat.RLEnv):
     def get_done(self, observations):
         episode_success = (self._distance_target() < self._success_distance
         )
-        return self._env.episode_over or episode_success
+        return (self._env.episode_over, episode_success)
 
     def get_info(self, observations):
         return self.habitat_env.get_metrics()

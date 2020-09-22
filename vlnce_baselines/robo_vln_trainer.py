@@ -14,8 +14,9 @@ import habitat_sim
 import gc
 import time
 import magnum as mn 
-
-from habitat_sim.utils.common import quat_to_magnum
+import time
+import quaternion
+from habitat_sim.utils.common import quat_to_magnum, quat_from_magnum
 
 import lmdb
 import msgpack_numpy
@@ -44,7 +45,7 @@ from vlnce_baselines.common.env_utils import (
     construct_envs_auto_reset_false,
     SimpleRLEnv
 )
-from vlnce_baselines.common.utils import transform_obs, batch_obs, repackage_hidden, split_batch_tbptt, repackage_mini_batch
+from vlnce_baselines.common.utils import transform_obs, batch_obs, batch_obs_data_collect, repackage_hidden, split_batch_tbptt, repackage_mini_batch
 from vlnce_baselines.models.cma_policy import CMAPolicy
 from vlnce_baselines.models.seq2seq_sem_attn import Seq2Seq_Sem_Attn_Policy
 from vlnce_baselines.models.seq2seq_policy import Seq2SeqPolicy
@@ -242,7 +243,13 @@ class IWTrajectoryDataset(torch.utils.data.IterableDataset):
         return self._preload.pop()
 
     def __next__(self):
-        obs, prev_actions, oracle_actions= self._load_next()
+        obs, prev_actions, oracle_actions, stop_step = self._load_next()
+        # obs, prev_actions, oracle_actions = self._load_next()
+
+        discrete_oracle_actions = obs['vln_oracle_action_sensor'].copy()
+        val = int(stop_step[-1])-1
+        discrete_oracle_actions[val:]=4
+        obs['vln_oracle_action_sensor'] = discrete_oracle_actions
 
         if self.is_bert:            
             instruction_batch = obs['instruction'][0]
@@ -427,7 +434,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
             start_id = lmdb_env.stat()["entries"]
             txn = lmdb_env.begin(write=True)
-
+            stop_step=0
             # episodes = []
             for episode in range(self.config.DAGGER.UPDATE_SIZE):
                 episode = []
@@ -442,22 +449,38 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 continuous_path_follower = ContinuousPathFollower(
                 self.envs.habitat_env._sim, reference_path, waypoint_threshold=0.4)
 
-                done = False
+                is_done = False
+                steps=0
+                stop_flag = False
+                valid_trajectories = True
                 while continuous_path_follower.progress < 1.0:
-                    if done:
+                    steps+=1
+                    if is_done:
                         break
                     continuous_path_follower.update_waypoint()
                     agent_state = self.envs.habitat_env._sim.get_agent_state()
                     previous_rigid_state = habitat_sim.RigidState(
                     quat_to_magnum(agent_state.rotation), agent_state.position
                     )
+
+                    if np.isnan(continuous_path_follower.waypoint).any() or np.isnan(previous_rigid_state.translation).any() or np.isnan(quaternion.as_euler_angles(quat_from_magnum(previous_rigid_state.rotation))).any():
+                        valid_trajectories = False
+                        break
                     vel,omega = track_waypoint(
                         continuous_path_follower.waypoint,
                         previous_rigid_state,
                         vel_control,
+                        progress = continuous_path_follower.progress,
                         dt=self.config.DAGGER.time_step,
                     )
                     observations, reward, done, info = self.envs.step(vel_control)
+                    episode_over, success = done
+
+                    if continuous_path_follower.progress >0.985 and not stop_flag:
+                        stop_step = steps
+                        stop_flag = True
+
+                    is_done = episode_over or (success and abs(vel)<0.005)
 
                     observations = transform_obs(
                         observations, self.config.TASK_CONFIG.TASK.INSTRUCTION_SENSOR_UUID, is_bert=self.config.MODEL.INSTRUCTION_ENCODER.is_bert
@@ -468,6 +491,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                             observations,
                             prev_actions,
                             actions,
+                            stop_step
 
                         )
                     )
@@ -476,45 +500,23 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 # episodes.append(episode)
 
                 # Save episode to LMDB directory
-                traj_obs = batch_obs([step[0] for step in episode],  device=torch.device("cpu"))
-                for k, v in traj_obs.items():
-                    traj_obs[k] = v.numpy()
-                transposed_ep = [
-                    traj_obs,
-                    np.array([step[1] for step in episode], dtype=float),
-                    np.array([step[2] for step in episode], dtype=float),
-                ]
-                txn.put(
-                    str(start_id + collected_eps).encode(),
-                    msgpack_numpy.packb(transposed_ep, use_bin_type=True),
-                )
+                if valid_trajectories:
+                    traj_obs = batch_obs_data_collect([step[0] for step in episode],  device=torch.device("cpu"))
+                    for k, v in traj_obs.items():
+                        traj_obs[k] = v.numpy()
+                    transposed_ep = [
+                        traj_obs,
+                        np.array([step[1] for step in episode], dtype=float),
+                        np.array([step[2] for step in episode], dtype=float),
+                        [step[3] for step in episode],
+                    ]
+                    txn.put(
+                        str(start_id + collected_eps).encode(),
+                        msgpack_numpy.packb(transposed_ep, use_bin_type=True),
+                    )
 
-                pbar.update()
-                collected_eps += 1
-
-                # if (
-                #     collected_eps % self.config.DAGGER.LMDB_STORE_FREQUENCY
-                # ) == 0:
-                #     for episode in episodes:
-                #         # Save episode to LMDB directory
-                #         traj_obs = batch_obs([step[0] for step in episode],  device=torch.device("cpu"))
-                #         del traj_obs["vln_oracle_action_sensor"]
-
-                #         for k, v in traj_obs.items():
-                #             traj_obs[k] = v.numpy()
-                #         transposed_ep = [
-                #             traj_obs,
-                #             np.array([step[1] for step in episode], dtype=float),
-                #             np.array([step[2] for step in episode], dtype=float),
-                #         ]
-                #         txn.put(
-                #             str(start_id + collected_eps).encode(),
-                #             msgpack_numpy.packb(transposed_ep, use_bin_type=True),
-                #         )
-
-                #         pbar.update()
-                #         collected_eps += 1
-                #         episodes =[]
+                    pbar.update()
+                    collected_eps += 1
 
                 if (
                     collected_eps % self.config.DAGGER.LMDB_COMMIT_FREQUENCY
@@ -747,7 +749,6 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
         batch = (observations, recurrent_hidden_states, prev_actions, not_done_masks)
         del observations, recurrent_hidden_states, prev_actions, not_done_masks
-        gc.collect()
         output, recurrent_hidden_states = self.actor_critic(batch)
         # distribution = self.actor_critic.build_distribution(
         #     observations, recurrent_hidden_states, prev_actions, not_done_masks
@@ -790,8 +791,6 @@ class RoboDaggerTrainer(BaseRLTrainer):
         #         pass
 
         loss_data = action_loss.detach()
-
-        gc.collect()
         # if isinstance(aux_loss, torch.Tensor):
         #     aux_loss_data = aux_loss.item()
         # else:
@@ -1169,18 +1168,19 @@ class RoboDaggerTrainer(BaseRLTrainer):
         ep_count = 0
         min_2nd_dim = 1000
         steps=0
+        start_time = time.time()
         while (
             len(stats_episodes) < config.EVAL.EPISODE_COUNT
         ):
+            
             current_episode = self.envs.habitat_env.current_episode
             # print("Number of episodes:", self.envs.number_of_episodes)
             # print("Number of envs:", self.envs.num_envs)
             # # print("Count episodes:", self.envs.count_episodes)
             # print("--------------------------------------------")
+            is_done = False
             with torch.no_grad():
-
                 batch = (observations, eval_recurrent_hidden_states, prev_actions, not_done_masks)
-                gc.collect()
                 output, eval_recurrent_hidden_states = self.actor_critic(batch)
                 # (_, actions, _, eval_recurrent_hidden_states) = self.actor_critic.act(
                 #     batch,
@@ -1201,8 +1201,9 @@ class RoboDaggerTrainer(BaseRLTrainer):
             vc.linear_velocity = mn.Vector3(0, 0, output[:,0].cpu().numpy())
             max_turn_speed = 1.0
             vc.angular_velocity = mn.Vector3(0, np.clip(output[:,1].cpu().numpy(), -max_turn_speed, max_turn_speed), 0)
-            observations, _, done, info = self.envs.step(vc)
-
+            observations, _, done, info = self.envs.step(vc) 
+            episode_over, success = done
+            is_done = episode_over or success 
             steps+=1
 
             if len(config.VIDEO_OPTION) > 0:
@@ -1239,7 +1240,10 @@ class RoboDaggerTrainer(BaseRLTrainer):
             #         )
             #         rgb_frames[i].append(frame)
 
-            if done or steps==self.config.TASK_CONFIG.ENVIRONMENT.MAX_EPISODE_STEPS:
+            if is_done or steps==self.config.TASK_CONFIG.ENVIRONMENT.MAX_EPISODE_STEPS:
+                is_done = False
+                print("Episode complete in steps:", steps)
+                print("single while loop time", time.time()-start_time)
                 ep_count+=1
                 steps=0
                 print("dones:", done)
@@ -1248,6 +1252,9 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 print("Current episode ID:", current_episode.episode_id)
                 print("Episode Completed:", ep_count)
                 print(" Episode done---------------------------------------------")
+                print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+                print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+                print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
                 observations = self.envs.reset()
                 prev_actions = torch.zeros(
                     config.NUM_PROCESSES, 2, device=self.device, dtype=torch.long
@@ -1262,7 +1269,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 )
                 metrics={"SPL":round(
                             stats_episodes[current_episode.episode_id]["spl"], 6
-                        ) }  
+                        ) } 
+                start_time = time.time() 
                 if len(config.VIDEO_OPTION) > 0:
                     time_step=30
                     generate_video(
@@ -1277,7 +1285,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     )
                     del stats_episodes[current_episode.episode_id]["top_down_map"]
                     rgb_frames =[]
-                # del stats_episodes[current_episodes[i].episode_id]["top_down_map"]
+                del stats_episodes[current_episode.episode_id]["top_down_map"]
                 if config.PLOT_ATTENTION:
                     for j in range(len(attention_weights[i])):
                         attention_weights[i][j] = attention_weights[i][j][:,:min_2nd_dim]
@@ -1292,19 +1300,13 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         )
                     attention_weights[i] = [] 
                     save_actions[i] =[]
+     
             observations = transform_obs(
                 observations, config.TASK_CONFIG.TASK.INSTRUCTION_SENSOR_UUID, is_bert=self.config.MODEL.INSTRUCTION_ENCODER.is_bert
             )
-
-            # observations = {
-            #     k: torch.tensor(v).to(device=self.device, non_blocking=True)
-            #     for k, v in observations.items()
-            # }
             observations = batch_obs(observations, self.device)
             k+=1
-            envs_to_pause = []
-            next_episode = self.envs.habitat_env.current_episode
-
+            
             # for i in range(self.envs.num_envs):
             #     if next_episodes[i].episode_id in stats_episodes:
             #         envs_to_pause.append(i)

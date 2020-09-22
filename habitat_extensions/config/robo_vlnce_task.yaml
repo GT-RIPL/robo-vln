@@ -16,20 +16,9 @@ SIMULATOR:
   DEPTH_SENSOR:
     WIDTH: 256  # pretrained DDPPO resnet needs 256x256
     HEIGHT: 256
-  # SEMANTIC_SENSOR:
-  #   WIDTH: 256
-  #   HEIGHT: 256
-
 TASK:
   TYPE: VLN-v0
-  SUCCESS_DISTANCE: 1.0
-  # SENSORS: [
-  #   INSTRUCTION_SENSOR,
-  #   VLN_ORACLE_ACTION_SENSOR,
-  #   VLN_ORACLE_PROGRESS_SENSOR,
-  #   HEADING_SENSOR,
-  #   EGO_SEM_SENSOR
-  # ]
+  SUCCESS_DISTANCE: 3.0
   SENSORS: [
     INSTRUCTION_SENSOR,
     VLN_ORACLE_ACTION_SENSOR,
@@ -52,10 +41,10 @@ TASK:
   ]
   NDTW:
     SUCCESS_DISTANCE: 3.0
-    GT_PATH: data/datasets/robo_vln/{split}/{split}_gt.json.gz
+    GT_PATH: data/datasets/robo_vln_v1/{split}/{split}_gt.json.gz
   SDTW:
     SUCCESS_DISTANCE: 3.0
-    GT_PATH: data/datasets/robo_vln/{split}/{split}_gt.json.gz
+    GT_PATH: data/datasets/robo_vln_v1/{split}/{split}_gt.json.gz
   SPL:
     SUCCESS_DISTANCE: 3.0
   SUCCESS:
@@ -65,5 +54,5 @@ TASK:
 DATASET:
   TYPE: VLN-CE-v1
   SPLIT: val_seen
-  DATA_PATH: data/datasets/robo_vln/{split}/{split}.json.gz
+  DATA_PATH: data/datasets/robo_vln_v1/{split}/{split}.json.gz
   SCENES_DIR: data/scene_datasets/

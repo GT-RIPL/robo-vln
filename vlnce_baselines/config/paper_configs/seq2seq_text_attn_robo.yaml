@@ -4,13 +4,13 @@ TORCH_GPU_ID: 0
 NUM_PROCESSES: 1
 TRAINER_NAME : "robo_vln_trainer"
 
-TENSORBOARD_DIR: /srv/share/mirshad7/data/robo-vln/tensorboard_dirs/seq2seq_bert
-CHECKPOINT_FOLDER: /srv/share/mirshad7/data/robo-vln/checkpoints/seq2seq_bert
-EVAL_CKPT_PATH_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/seq2seq_bert/ckpt.4.pth
+TENSORBOARD_DIR: /srv/share/mirshad7/data/robo-vln/tensorboard_dirs/seq2seq_bert/test2
+CHECKPOINT_FOLDER: /srv/share/mirshad7/data/robo-vln/checkpoints/seq2seq_bert/test2
+EVAL_CKPT_PATH_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/seq2seq_bert/ckpt.5.pth
 
 VIDEO_DIR: "videos/debug/seq2seq_text_attn/test/seen"
 PLOT_ATTENTION: False
-VIDEO_OPTION: ["disk"]  # options: "disk", "tensorboard"
+VIDEO_OPTION: []  # options: "disk", "tensorboard"
 
 EVAL:
   USE_CKPT_CONFIG: False

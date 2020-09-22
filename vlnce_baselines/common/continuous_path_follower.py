@@ -120,7 +120,8 @@ def remove_all_objects(sim):
     for id in sim.get_existing_object_ids():
         sim.remove_object(id)
 
-def track_waypoint(waypoint, rs, vc, dt=1.0 / 60.0):
+
+def track_waypoint(waypoint, rs, vc, progress, dt=1.0 / 30.0):
     angular_error_threshold = 0.5
     max_linear_speed = 1.0
     max_turn_speed = 1.0
@@ -131,7 +132,10 @@ def track_waypoint(waypoint, rs, vc, dt=1.0 / 60.0):
     angle_error = float(mn.math.angle(glob_forward, u_to_waypoint))
 
     new_velocity = 0
-    if angle_error < angular_error_threshold:
+    if progress >0.985:
+         # slow down to 0
+        new_velocity = (vc.linear_velocity[2]) / 1.5
+    elif angle_error < angular_error_threshold:
         # speed up to max
         new_velocity = (vc.linear_velocity[2] - max_linear_speed) / 2.0
     else:
@@ -153,3 +157,37 @@ def track_waypoint(waypoint, rs, vc, dt=1.0 / 60.0):
         0, np.clip(rot_dir * angular_correction, -max_turn_speed, max_turn_speed), 0
     )
     return new_velocity, np.clip(rot_dir * angular_correction, -max_turn_speed, max_turn_speed)
+
+# def track_waypoint(waypoint, rs, vc, dt=1.0 / 60.0):
+#     angular_error_threshold = 0.5
+#     max_linear_speed = 1.0
+#     max_turn_speed = 1.0
+#     glob_forward = rs.rotation.transform_vector(mn.Vector3(0, 0, -1.0)).normalized()
+#     glob_right = rs.rotation.transform_vector(mn.Vector3(-1.0, 0, 0)).normalized()
+#     to_waypoint = mn.Vector3(waypoint) - rs.translation
+#     u_to_waypoint = to_waypoint.normalized()
+#     angle_error = float(mn.math.angle(glob_forward, u_to_waypoint))
+
+#     new_velocity = 0
+#     if angle_error < angular_error_threshold:
+#         # speed up to max
+#         new_velocity = (vc.linear_velocity[2] - max_linear_speed) / 2.0
+#     else:
+#         # slow down to 0
+#         new_velocity = (vc.linear_velocity[2]) / 2.0
+#     vc.linear_velocity = mn.Vector3(0, 0, new_velocity)
+
+#     # angular part
+#     rot_dir = 1.0
+#     if mn.math.dot(glob_right, u_to_waypoint) < 0:
+#         rot_dir = -1.0
+#     angular_correction = 0.0
+#     if angle_error > (max_turn_speed * 10.0 * dt):
+#         angular_correction = max_turn_speed
+#     else:
+#         angular_correction = angle_error / 2.0
+
+#     vc.angular_velocity = mn.Vector3(
+#         0, np.clip(rot_dir * angular_correction, -max_turn_speed, max_turn_speed), 0
+#     )
+#     return new_velocity, np.clip(rot_dir * angular_correction, -max_turn_speed, max_turn_speed)
