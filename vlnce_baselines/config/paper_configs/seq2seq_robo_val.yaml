@@ -20,14 +20,14 @@ EVAL:
 DAGGER:
   ITERATIONS: 1
   EPOCHS: 10
-  UPDATE_SIZE: 7739
+  UPDATE_SIZE: 570
   #7739  
   #570
-  COLLECT_DATA_SPLIT: train
+  COLLECT_DATA_SPLIT: val_seen
   BATCH_SIZE: 1
   P: 1.0
   PRELOAD_LMDB_FEATURES: False
-  LMDB_FEATURES_DIR: /srv/share3/mirshad7/data/robo-vln/trajectory_dir/robo_complete/train/trajectories.lmdb
+  LMDB_FEATURES_DIR: /srv/share3/mirshad7/data/robo-vln/trajectory_dir/robo_complete/val_seen/trajectories.lmdb
 
 MODEL:
   LANG_ATTN:

@@ -5,7 +5,6 @@ from habitat import Config, Dataset
 from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
 from habitat_baselines.common.baseline_registry import baseline_registry
 
-
 @baseline_registry.register_env(name="VLNCEDaggerEnv")
 class VLNCEDaggerEnv(habitat.RLEnv):
     def __init__(self, config: Config, dataset: Optional[Dataset] = None):
@@ -39,7 +38,8 @@ class VLNCEDaggerEnv(habitat.RLEnv):
         return (self._env.episode_over, episode_success)
 
     def get_info(self, observations):
-        return self.habitat_env.get_metrics()
+        # return self.habitat_env.get_metrics()
+        return 0.0
 
     def get_object2idx(self):
         return self._env.task.sensor_suite.get('ego_sem_map').map_sensor.object2idx

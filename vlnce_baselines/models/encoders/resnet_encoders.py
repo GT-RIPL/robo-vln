@@ -193,7 +193,7 @@ class TorchVisionResNet50(nn.Module):
         """
 
         def resnet_forward(observation):
-            resnet_output = torch.zeros(1, dtype=torch.float32, device=self.device)
+            resnet_output = torch.zeros(1, dtype=torch.float32, device=observation.device)
 
             def hook(m, i, o):
                 resnet_output.set_(o)

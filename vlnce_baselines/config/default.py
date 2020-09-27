@@ -62,9 +62,10 @@ _C.DAGGER.UPDATE_SIZE = 5000
 _C.DAGGER.BATCH_SIZE = 3
 _C.DAGGER.P = 1.0
 _C.DAGGER.time_step = 1.0 / (30)
-_C.DAGGER.LMDB_MAP_SIZE = 2.5e12
+_C.DAGGER.LMDB_MAP_SIZE = 1e12
 _C.DAGGER.tbptt_steps = 100
 _C.DAGGER.split_dim = 0
+_C.DAGGER.COLLECT_DATA_SPLIT = 'val_seen'
 
 # How often to commit the writes to the DB, less commits is
 # better, but everything must be in memory until a commit happens/
@@ -174,6 +175,9 @@ _C.MODEL.STATE_ENCODER.rnn_type = "LSTM"
 _C.MODEL.SEQ2SEQ = CN()
 _C.MODEL.SEQ2SEQ.use_prev_action = False
 
+_C.MODEL.HIERARCHICAL = CN()
+_C.MODEL.SEQ2SEQ.use_prev_action = False
+
 _C.MODEL.CMA = CN()
 _C.MODEL.CMA.use = False
 # Use the state encoding model in RCM. If false,
@@ -181,7 +185,7 @@ _C.MODEL.CMA.use = False
 _C.MODEL.CMA.rcm_state_encoder = False
 
 _C.MODEL.PROGRESS_MONITOR = CN()
-_C.MODEL.PROGRESS_MONITOR.use = True
+_C.MODEL.PROGRESS_MONITOR.use = False
 _C.MODEL.PROGRESS_MONITOR.alpha = 1.0  # loss multiplier
 
 

@@ -46,13 +46,8 @@ from vlnce_baselines.common.env_utils import (
     SimpleRLEnv
 )
 from vlnce_baselines.common.utils import transform_obs, batch_obs, batch_obs_data_collect, repackage_hidden, split_batch_tbptt, repackage_mini_batch
-from vlnce_baselines.models.cma_policy import CMAPolicy
-from vlnce_baselines.models.seq2seq_sem_attn import Seq2Seq_Sem_Attn_Policy
-from vlnce_baselines.models.seq2seq_policy import Seq2SeqPolicy
-from vlnce_baselines.models.seq2seq_text_attn import Seq2Seq_Lang_Attn
-from vlnce_baselines.models.seq2seq_sem_text_attn import Seq2Seq_Sem_Text_Attn
-from vlnce_baselines.models.hybrid_cma_mp import TransformerHybridPolicy
-from vlnce_baselines.models.seq2seq import Seq2SeqNet
+from vlnce_baselines.models.seq2seq_highlevel import Seq2Seq_HighLevel
+from vlnce_baselines.models.seq2seq_lowlevel import Seq2Seq_LowLevel
 
 
 with warnings.catch_warnings():
@@ -243,13 +238,13 @@ class IWTrajectoryDataset(torch.utils.data.IterableDataset):
         return self._preload.pop()
 
     def __next__(self):
-        obs, prev_actions, oracle_actions, stop_step = self._load_next()
+        obs, prev_actions, oracle_actions = self._load_next()
         # obs, prev_actions, oracle_actions = self._load_next()
 
-        discrete_oracle_actions = obs['vln_oracle_action_sensor'].copy()
-        val = int(stop_step[-1])-1
-        discrete_oracle_actions[val:]=4
-        obs['vln_oracle_action_sensor'] = discrete_oracle_actions
+        # discrete_oracle_actions = obs['vln_oracle_action_sensor'].copy()
+        # val = int(stop_step[-1])-1
+        # discrete_oracle_actions[val:]=4
+        # obs['vln_oracle_action_sensor'] = discrete_oracle_actions
 
         if self.is_bert:            
             instruction_batch = obs['instruction'][0]
@@ -292,17 +287,24 @@ class IWTrajectoryDataset(torch.utils.data.IterableDataset):
         return self
 
 
-@baseline_registry.register_trainer(name="robo_vln_trainer")
+@baseline_registry.register_trainer(name="hierarchical_trainer")
 class RoboDaggerTrainer(BaseRLTrainer):
     def __init__(self, config=None):
         super().__init__(config)
-        self.actor_critic = None
+        self.high_level = None
+        self.low_level = None
         self.envs = None
 
         # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.device = (
             torch.device("cuda", self.config.TORCH_GPU_ID)
+            if torch.cuda.is_available()
+            else torch.device("cpu")
+        )
+
+        self.device2 = (
+            torch.device("cuda:1")
             if torch.cuda.is_available()
             else torch.device("cpu")
         )
@@ -323,52 +325,30 @@ class RoboDaggerTrainer(BaseRLTrainer):
         config.TORCH_GPU_ID = self.config.TORCH_GPU_ID
         config.freeze()
 
-        if config.CMA.use:
-            self.actor_critic = CMAPolicy(
+        self.high_level = Seq2Seq_HighLevel(
                 observation_space=self.envs.observation_space,
-                action_space=self.envs.action_space,
+                num_actions=self.envs.action_space.n,
                 model_config=config,
-            )
-        elif config.SEM_ATTN_ENCODER.use:
-            self.actor_critic = Seq2Seq_Sem_Attn_Policy(
-                observation_space=self.envs.observation_space,
-                action_space=self.envs.action_space,
-                model_config=config,
-            )
-        elif config.LANG_ATTN.use:
-            self.actor_critic = Seq2Seq_Lang_Attn(
-                observation_space=self.envs.observation_space,
-                action_space=self.envs.action_space,
-                model_config=config,
-            )
-        elif config.SEM_TEXT_ATTN.use:
-            self.actor_critic = Seq2Seq_Sem_Text_Attn(
-                observation_space=self.envs.observation_space,
-                action_space=self.envs.action_space,
-                model_config=config,
+                batch_size = self.config.DAGGER.BATCH_SIZE,
             )
 
-        elif config.TRANSFORMER.use:
-            self.actor_critic = TransformerHybridPolicy(
-                observation_space=self.envs.observation_space,
-                action_space=self.envs.action_space,
-                model_config=config,
-                batch_size=self.config.DAGGER.BATCH_SIZE,
-                gpus = [0,1,2]
-            )
-        else:
-            self.actor_critic = Seq2SeqNet(
+        self.low_level = Seq2Seq_LowLevel(
                 observation_space=self.envs.observation_space,
                 num_actions=2,
+                num_sub_tasks=self.envs.action_space.n,
                 model_config=config,
                 batch_size = self.config.DAGGER.BATCH_SIZE,
             )
 
         if not self.config.MODEL.TRANSFORMER.split_gpus:
-            self.actor_critic.to(self.device)    
+            self.high_level.to(self.device)
+            # self.low_level.to(self.device2)    
 
-        self.optimizer = torch.optim.Adam(
-            self.actor_critic.parameters(), lr=self.config.DAGGER.LR
+        self.optimizer_high_level = torch.optim.Adam(
+            self.high_level.parameters(), lr=self.config.DAGGER.LR
+        )
+        self.optimizer_low_level = torch.optim.Adam(
+            self.low_level.parameters(), lr=self.config.DAGGER.LR
         )
 
         # self.optimizer = torch.optim.AdamW(self.actor_critic.parameters(), 
@@ -378,7 +358,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
         # self.scheduler = torch.optim.lr_scheduler.CyclicLR(self.optimizer, base_lr=2e-6, max_lr=1e-4, step_size_up=1000,step_size_down=50000, cycle_momentum=False)
         if load_from_ckpt:
             ckpt_dict = self.load_checkpoint(ckpt_path, map_location="cpu")
-            self.actor_critic.load_state_dict(ckpt_dict["state_dict"])
+            self.high_level.load_state_dict(ckpt_dict["high_level_state_dict"])
+            self.low_level.load_state_dict(ckpt_dict["low_level_state_dict"])
             logger.info(f"Loaded weights from checkpoint: {ckpt_path}")
         logger.info("Finished setting up actor critic model.")
 
@@ -392,7 +373,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
             None
         """
         checkpoint = {
-            "state_dict": self.actor_critic.state_dict(),
+            "high_level_state_dict": self.high_level.state_dict(),
+            "low_level_state_dict": self.low_level.state_dict(),
             "config": self.config,
         }
         torch.save(checkpoint, os.path.join(self.config.CHECKPOINT_FOLDER, file_name))
@@ -430,6 +412,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
         with tqdm.tqdm(total=self.config.DAGGER.UPDATE_SIZE) as pbar, lmdb.open(
             self.lmdb_features_dir, map_size=int(self.config.DAGGER.LMDB_MAP_SIZE)
         ) as lmdb_env, torch.no_grad():
+
+
             start_id = lmdb_env.stat()["entries"]
             txn = lmdb_env.begin(write=True)
             stop_step=0
@@ -471,7 +455,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         progress = continuous_path_follower.progress,
                         dt=self.config.DAGGER.time_step,
                     )
-                    observations, _, done, _ = self.envs.step(vel_control)
+                    observations, reward, done, info = self.envs.step(vel_control)
                     episode_over, success = done
 
                     if continuous_path_follower.progress >0.985 and not stop_flag:
@@ -727,12 +711,16 @@ class RoboDaggerTrainer(BaseRLTrainer):
     #         depth_hook.remove()
 
     def _update_agent(
-        self, observations, prev_actions, not_done_masks, corrected_actions, recurrent_hidden_states
+        self, observations, prev_actions, not_done_masks, corrected_actions, high_recurrent_hidden_states, 
+        low_recurrent_hidden_states
     ):
         # T, N, C = corrected_actions.size()
-        self.optimizer.zero_grad()
+        self.optimizer_high_level.zero_grad()
+        self.optimizer_low_level.zero_grad()
 
-        criterion = nn.MSELoss()
+
+        high_level_criterion = nn.CrossEntropyLoss(ignore_index=-1, reduction="mean")
+        low_level_criterion = nn.MSELoss()
         # recurrent_hidden_states =[]
         # recurrent_hidden_states = torch.zeros(
         #     self.actor_critic.state_encoder.num_recurrent_layers,
@@ -743,60 +731,63 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
         AuxLosses.clear()
 
-        recurrent_hidden_states = repackage_hidden(recurrent_hidden_states)
+        high_recurrent_hidden_states = repackage_hidden(high_recurrent_hidden_states)
+        low_recurrent_hidden_states = repackage_hidden(low_recurrent_hidden_states)
 
-        batch = (observations, recurrent_hidden_states, prev_actions, not_done_masks)
-        del observations, recurrent_hidden_states, prev_actions, not_done_masks
-        output, recurrent_hidden_states = self.actor_critic(batch)
+        batch = (observations, high_recurrent_hidden_states, prev_actions, not_done_masks)
+        # del observations, recurrent_hidden_states, prev_actions, not_done_masks
+        output, high_recurrent_hidden_states = self.high_level(batch)
         # distribution = self.actor_critic.build_distribution(
         #     observations, recurrent_hidden_states, prev_actions, not_done_masks
         # )
+        del batch
+        high_level_action_mask = observations['vln_oracle_action_sensor'] ==0
+        output = output.masked_fill_(high_level_action_mask, 0)
+        observations['vln_oracle_action_sensor'] = observations['vln_oracle_action_sensor'].squeeze(1).to(dtype=torch.int64)
+        print("oracle action sensor",observations['vln_oracle_action_sensor'].shape)
+        print("output shape",output.shape)
+        high_level_loss = high_level_criterion(output,observations['vln_oracle_action_sensor'])
+
+        high_level_loss.backward()
+        self.optimizer_high_level.step()
+        high_level_loss_data = high_level_loss.detach()
+
+        del output
+
+        self.low_level.to(self.device2)
+
+        observations = {
+            k: v.to(device=self.device2, non_blocking=True)
+            for k, v in observations.items()
+        }
+
+        batch = (observations,
+                low_recurrent_hidden_states,
+                prev_actions.to(
+                    device=self.device2, non_blocking=True
+                ),
+                not_done_masks.to(
+                    device=self.device2, non_blocking=True
+                )) 
+
+        del observations, prev_actions, not_done_masks
+        output, low_recurrent_hidden_states = self.low_level(batch)
+
+        corrected_actions = corrected_actions.to(self.device2)
 
         action_mask = corrected_actions==0
         output = output.masked_fill_(action_mask, 0)
         output = output.to(dtype=torch.float)
         corrected_actions = corrected_actions.to(dtype=torch.float)
+        low_level_loss = low_level_criterion(output, corrected_actions)
+        low_level_loss.backward()
+        self.optimizer_low_level.step()
 
-        # print(logits.shape)
-        # logits = logits.view(T, N, -1)
-        # corrected_actions = corrected_actions.contiguous().view(T*N, C).to(dtype=torch.float)
-        # print(corrected_actions.shape)
-        # action_loss = F.cross_entropy(
-        #     logits.permute(0, 2, 1), corrected_actions, reduction="none"
-        # )
-        # action_loss = F.cross_entropy(
-        #     logits, corrected_actions, reduction="none"
-        # )
-        action_loss = criterion(output, corrected_actions)
-        # action_loss = action_loss.view(T, N)
-        # action_loss = ((weights * action_loss).sum(0) / weights.sum(0)).mean()
-
-        # aux_mask = (weights > 0).view(-1)
-        # aux_loss = AuxLosses.reduce(aux_mask)
-
-        # loss = action_loss + aux_loss
-
-        # loss.backward()
-        action_loss.backward()
-        self.optimizer.step()
-
-        # for obj in gc.get_objects():
-        #     try:
-        #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-                    
-        #             print(type(obj), obj.size())
-        #     except:
-        #         pass
-
-        loss_data = action_loss.detach()
-        # if isinstance(aux_loss, torch.Tensor):
-        #     aux_loss_data = aux_loss.item()
-        # else:
-        #     aux_loss_data = aux_loss
+        low_level_loss_data = low_level_loss.detach()
 
         aux_loss_data =0
-        del output, action_loss
-        return loss_data, aux_loss_data, recurrent_hidden_states
+        del output, high_level_loss, low_level_loss
+        return high_level_loss_data, low_level_loss_data, aux_loss_data, high_recurrent_hidden_states, low_recurrent_hidden_states
 
     def train(self) -> None:
         r"""Main method for training DAgger.
@@ -829,7 +820,6 @@ class RoboDaggerTrainer(BaseRLTrainer):
             self.config.TASK_CONFIG.ENVIRONMENT.ITERATOR_OPTIONS.MAX_SCENE_REPEAT_STEPS = (
                 -1
             )
-        # config.TASK_CONFIG.DATASET.SPLIT = config.DAGGER.COLLECT_DATA_SPLIT
         self.config.freeze()
 
         if self.config.DAGGER.PRELOAD_LMDB_FEATURES:
@@ -850,17 +840,23 @@ class RoboDaggerTrainer(BaseRLTrainer):
         )
 
         logger.info(
-            "agent number of parameters: {}".format(
-                sum(param.numel() for param in self.actor_critic.parameters())
+            "agent number of high level parameters: {}".format(
+                sum(param.numel() for param in self.high_level.parameters())
             )
         )
+
         logger.info(
-            "agent number of trainable parameters: {}".format(
-                sum(
-                    p.numel() for p in self.actor_critic.parameters() if p.requires_grad
-                )
+            "agent number of low level parameters: {}".format(
+                sum(param.numel() for param in self.low_level.parameters())
             )
         )
+        # logger.info(
+        #     "agent number of trainable parameters: {}".format(
+        #         sum(
+        #             p.numel() for p in self.actor_critic.parameters() if p.requires_grad
+        #         )
+        #     )
+        # )
 
         if self.config.DAGGER.PRELOAD_LMDB_FEATURES:
             self.envs.close()
@@ -913,12 +909,20 @@ class RoboDaggerTrainer(BaseRLTrainer):
                             corrected_actions_batch,
                         ) = batch
 
-                        recurrent_hidden_states = torch.zeros(
-                            self.actor_critic.state_encoder.num_recurrent_layers,
+                        high_recurrent_hidden_states = torch.zeros(
+                            self.high_level.state_encoder.num_recurrent_layers,
                             self.config.DAGGER.BATCH_SIZE,
                             self.config.MODEL.STATE_ENCODER.hidden_size,
                             device=self.device,
                         )
+                        low_recurrent_hidden_states = torch.zeros(
+                            self.low_level.state_encoder.num_recurrent_layers,
+                            self.config.DAGGER.BATCH_SIZE,
+                            self.config.MODEL.STATE_ENCODER.hidden_size,
+                            device=self.device2,
+                        )
+
+                        
 
                         batch_split = split_batch_tbptt(observations_batch, prev_actions_batch, not_done_masks, 
                                                         corrected_actions_batch, self.config.DAGGER.tbptt_steps, 
@@ -944,7 +948,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                                 for k, v in observations_batch.items()
                             }
                             try:
-                                loss, aux_loss, recurrent_hidden_states= self._update_agent(
+                                hl_loss, ll_loss, aux_loss, high_recurrent_hidden_states, low_recurrent_hidden_states= self._update_agent(
                                     observations_batch,
                                     prev_actions_batch.to(
                                         device=self.device, non_blocking=True
@@ -955,7 +959,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
                                     corrected_actions_batch.to(
                                         device=self.device, non_blocking=True
                                     ),
-                                    recurrent_hidden_states,
+                                    high_recurrent_hidden_states,
+                                    low_recurrent_hidden_states,
                                 )
                             except:
                                 logger.info(
@@ -998,12 +1003,14 @@ class RoboDaggerTrainer(BaseRLTrainer):
                             # # For CyclicalLR
                             # self.scheduler.step()
 
-                        logger.info(f"train_loss: {loss}")
+                        # logger.info(f"train_high_level_loss: {hl_loss}")
+                        # logger.info(f"train_low_level_loss: {ll_loss}")
                         # logger.info(f"train_action_loss: {action_loss}")
                         logger.info(f"train_aux_loss: {aux_loss}")
                         logger.info(f"Batches processed: {step_id}.")
                         logger.info(f"On DAgger iter {dagger_it}, Epoch {epoch}.")
-                        writer.add_scalar(f"train_loss_iter_{dagger_it}", loss, step_id)
+                        writer.add_scalar(f"train_high_level_loss_iter_{dagger_it}", hl_loss, step_id)
+                        writer.add_scalar(f"train_low_level_loss_iter_{dagger_it}", ll_loss, step_id)
                         # writer.add_scalar(
                         #     f"train_action_loss_iter_{dagger_it}", action_loss, step_id
                         # )
@@ -1037,7 +1044,6 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         # writer.add_scalar(
                         #     f"Cache_2_mem_usage_{dagger_it}", torch.cuda.memory_cached(2), step_id
                         # )
-                        del loss
                         # torch.cuda.empty_cache() 
                         step_id += 1
                         # end = time.time()
