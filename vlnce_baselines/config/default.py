@@ -62,10 +62,11 @@ _C.DAGGER.UPDATE_SIZE = 5000
 _C.DAGGER.BATCH_SIZE = 3
 _C.DAGGER.P = 1.0
 _C.DAGGER.time_step = 1.0 / (30)
-_C.DAGGER.LMDB_MAP_SIZE = 1e12
+_C.DAGGER.LMDB_MAP_SIZE = 2.7e12
+_C.DAGGER.LMDB_EVAL_SIZE = 1e11
 _C.DAGGER.tbptt_steps = 100
 _C.DAGGER.split_dim = 0
-_C.DAGGER.COLLECT_DATA_SPLIT = 'val_seen'
+_C.DAGGER.COLLECT_DATA_SPLIT = 'train'
 
 # How often to commit the writes to the DB, less commits is
 # better, but everything must be in memory until a commit happens/
@@ -76,6 +77,7 @@ _C.DAGGER.USE_IW = True
 # If True, load precomputed features directly from LMDB_FEATURES_DIR.
 _C.DAGGER.PRELOAD_LMDB_FEATURES = False
 _C.DAGGER.LMDB_FEATURES_DIR = "data/trajectories_dirs/debug/trajectories.lmdb"
+_C.DAGGER.LMDB_EVAL_DIR = "data/trajectories_dirs/debug/trajectories.lmdb"
 # load an already trained model for fine tuning
 _C.DAGGER.LOAD_FROM_CKPT = False
 _C.DAGGER.CKPT_TO_LOAD = "data/checkpoints/ckpt.0.pth"
@@ -103,7 +105,7 @@ _C.MODEL.INSTRUCTION_ENCODER.dataset_vocab = (
     "data/datasets/R2R_VLNCE_v1_preprocessed/train/train.json.gz"
 )
 _C.MODEL.INSTRUCTION_ENCODER.fine_tune_embeddings = False
-_C.MODEL.INSTRUCTION_ENCODER.embedding_size = 768
+_C.MODEL.INSTRUCTION_ENCODER.embedding_size = 50
 _C.MODEL.INSTRUCTION_ENCODER.hidden_size = 256
 _C.MODEL.INSTRUCTION_ENCODER.rnn_type = "LSTM"
 _C.MODEL.INSTRUCTION_ENCODER.final_state_only = True

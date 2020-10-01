@@ -132,8 +132,7 @@ def transform_obs(
 
     return observations
 
-
-def split_batch_tbptt(batch, prev_actions, not_done_masks, corrected_actions, tbptt_steps, split_dim):
+def split_batch_tbptt(batch, prev_actions, not_done_masks, corrected_actions, oracle_stop_batch, tbptt_steps, split_dim):
     new_observations_batch = defaultdict(list)
     split_observations_batch = defaultdict()
     batch_split=[]
@@ -143,20 +142,47 @@ def split_batch_tbptt(batch, prev_actions, not_done_masks, corrected_actions, tb
             continue
         for x in batch[sensor].split(tbptt_steps, dim=split_dim):
             new_observations_batch[sensor].append(x)            
-    for i, (prev_action_split, corrected_action_split, masks_split) in enumerate(
+    for i, (prev_action_split, corrected_action_split, masks_split, oracle_stop_split) in enumerate(
             zip(prev_actions.split(tbptt_steps, dim=split_dim), 
                   corrected_actions.split(tbptt_steps, dim=split_dim), 
-                  not_done_masks.split(tbptt_steps, dim=split_dim))):
+                  not_done_masks.split(tbptt_steps, dim=split_dim),
+                  oracle_stop_batch.split(tbptt_steps, dim=split_dim) )):
             for sensor in new_observations_batch:
                 if sensor == 'instruction':
                     split_observations_batch[sensor] = new_observations_batch[sensor]
                 else:
                     split_observations_batch[sensor] = new_observations_batch[sensor][i]
-            split = (split_observations_batch, prev_action_split, masks_split, corrected_action_split)
+            split = (split_observations_batch, prev_action_split, masks_split, corrected_action_split, oracle_stop_split)
             split_observations_batch = {}
             batch_split.append(split)
             
     return batch_split
+
+
+# def split_batch_tbptt(batch, prev_actions, not_done_masks, corrected_actions, tbptt_steps, split_dim):
+#     new_observations_batch = defaultdict(list)
+#     split_observations_batch = defaultdict()
+#     batch_split=[]
+#     for sensor in batch:
+#         if sensor == 'instruction':
+#             new_observations_batch[sensor] = batch[sensor]
+#             continue
+#         for x in batch[sensor].split(tbptt_steps, dim=split_dim):
+#             new_observations_batch[sensor].append(x)            
+#     for i, (prev_action_split, corrected_action_split, masks_split) in enumerate(
+#             zip(prev_actions.split(tbptt_steps, dim=split_dim), 
+#                   corrected_actions.split(tbptt_steps, dim=split_dim), 
+#                   not_done_masks.split(tbptt_steps, dim=split_dim))):
+#             for sensor in new_observations_batch:
+#                 if sensor == 'instruction':
+#                     split_observations_batch[sensor] = new_observations_batch[sensor]
+#                 else:
+#                     split_observations_batch[sensor] = new_observations_batch[sensor][i]
+#             split = (split_observations_batch, prev_action_split, masks_split, corrected_action_split)
+#             split_observations_batch = {}
+#             batch_split.append(split)
+            
+#     return batch_split
 
 def repackage_mini_batch(batch):
     split_observations_batch, prev_action_split, not_done_masks, corrected_action_split = batch
