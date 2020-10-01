@@ -97,6 +97,7 @@ class Seq2Seq_LowLevel(nn.Module):
 
         self.train()
         self.linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, num_actions)
+        self.stop_linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, 1)
 
     @property
     def output_size(self):
@@ -154,5 +155,6 @@ class Seq2Seq_LowLevel(nn.Module):
                 self.model_config.PROGRESS_MONITOR.alpha,
             )
 
-        x = self.linear(x)
-        return x, rnn_hidden_states
+        out = self.linear(x)
+        stop_out = self.stop_linear(x)
+        return out, stop_out, rnn_hidden_states

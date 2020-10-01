@@ -30,5 +30,5 @@ DAGGER:
 MODEL:
   INSTRUCTION_ENCODER:
     final_state_only: True
-    use_pretrained_embeddings: False
-    is_bert: True
+    use_pretrained_embeddings: True
+    is_bert: False

@@ -31,6 +31,8 @@ from habitat_baselines.common.base_trainer import BaseRLTrainer
 from habitat_baselines.common.baseline_registry import baseline_registry
 from habitat_baselines.common.environments import get_env_class
 from habitat_baselines.common.tensorboard_utils import TensorboardWriter
+# WandB – Import the wandb library
+import wandb
 from habitat_baselines.common.utils import generate_video
 from vlnce_baselines.common.continuous_path_follower import (
     ContinuousPathFollower,
@@ -56,6 +58,16 @@ with warnings.catch_warnings():
 
 # from pynvml import *
 # nvmlInit()
+
+#WandB – Login to your wandb account so you can log all your metrics
+wandb.login()
+
+wandb.init(project="Robo_VLN_Base_Hierarchical_w_glove")
+
+wb_config = wandb.config
+wb_config.LR = 1e-4
+wb_config.EPOCHS = 20
+wb_config.BATCH_SIZE = 1
 
 
 class ObservationsDict(dict):
@@ -95,6 +107,7 @@ def collate_fn(batch):
     observations_batch = list(transposed[0])
     prev_actions_batch = list(transposed[1])
     corrected_actions_batch = list(transposed[2])
+    oracle_stop_batch = list(transposed[3])
     N = len(corrected_actions_batch)
 #     weights_batch = list(transposed[3])
     B = len(prev_actions_batch)
@@ -125,6 +138,7 @@ def collate_fn(batch):
         corrected_actions_batch[bid] = _pad_helper(
             corrected_actions_batch[bid], max_traj_len, fill_val=0.0
         )
+        oracle_stop_batch[bid] = _pad_helper(oracle_stop_batch[bid], max_traj_len, fill_val=-1.0)
 #         weights_batch[bid] = _pad_helper(weights_batch[bid], max_traj_len)
     
 
@@ -140,12 +154,14 @@ def collate_fn(batch):
 #     weights_batch = torch.stack(weights_batch, dim=1)
     not_done_masks = torch.ones_like(corrected_actions_batch, dtype=torch.float)
     not_done_masks[0] = 0
-    
+    oracle_stop_batch = torch.stack(oracle_stop_batch, dim=1)
+
     prev_actions_batch = prev_actions_batch.transpose(1,0)
     not_done_masks = not_done_masks.transpose(1,0)
     corrected_actions_batch = corrected_actions_batch.transpose(1,0)
 #     weights_batch = weights_batch.transpose(1,0)
-    
+    oracle_stop_batch = oracle_stop_batch.transpose(1,0)
+
     observations_batch = ObservationsDict(observations_batch)
 
     return (
@@ -153,6 +169,7 @@ def collate_fn(batch):
         prev_actions_batch.contiguous().view(-1, 2),
         not_done_masks.contiguous().view(-1, 2),
         corrected_actions_batch.contiguous().view(-1,2),
+        oracle_stop_batch.contiguous().view(-1,1)
     )
 
     # return (
@@ -238,13 +255,15 @@ class IWTrajectoryDataset(torch.utils.data.IterableDataset):
         return self._preload.pop()
 
     def __next__(self):
-        obs, prev_actions, oracle_actions = self._load_next()
+        obs, prev_actions, oracle_actions, stop_step = self._load_next()
         # obs, prev_actions, oracle_actions = self._load_next()
 
-        # discrete_oracle_actions = obs['vln_oracle_action_sensor'].copy()
-        # val = int(stop_step[-1])-1
-        # discrete_oracle_actions[val:]=4
-        # obs['vln_oracle_action_sensor'] = discrete_oracle_actions
+        discrete_oracle_actions = obs['vln_oracle_action_sensor'].copy()
+        val = int(stop_step[-1])-1
+        discrete_oracle_actions[val:]=4
+        obs['vln_oracle_action_sensor'] = discrete_oracle_actions
+        oracle_stop = np.zeros_like(obs['vln_oracle_action_sensor'])
+        oracle_stop[val:] = 1
 
         if self.is_bert:            
             instruction_batch = obs['instruction'][0]
@@ -263,10 +282,9 @@ class IWTrajectoryDataset(torch.utils.data.IterableDataset):
             obs[k] = torch.from_numpy(v)
 
         prev_actions = torch.from_numpy(prev_actions)
-        
-        
+        oracle_stop = torch.from_numpy(oracle_stop)
         oracle_actions = torch.from_numpy(oracle_actions)
-        return (obs, prev_actions, oracle_actions)
+        return (obs, prev_actions, oracle_actions, oracle_stop)
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
@@ -311,6 +329,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         self.lmdb_features_dir = self.config.DAGGER.LMDB_FEATURES_DIR.format(
             split=config.TASK_CONFIG.DATASET.SPLIT
         )
+        self.lmdb_eval_dir = self.config.DAGGER.LMDB_EVAL_DIR
 
     def _setup_actor_critic_agent(
         self, config: Config, load_from_ckpt: bool, ckpt_path: str
@@ -508,226 +527,21 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
                 episode = []
                 prev_actions = np.zeros((1,2))
-
+            txn.commit()
         self.envs.close()
         self.envs = None
 
-
-    # def _update_dataset(self, data_it):
-    #     if torch.cuda.is_available():
-    #         with torch.cuda.device(self.device):
-    #             torch.cuda.empty_cache()
-
-    #     if self.envs is None:
-    #         self.envs = construct_envs(self.config, get_env_class(self.config.ENV_NAME))
-
-    #     recurrent_hidden_states = torch.zeros(
-    #         self.actor_critic.net.num_recurrent_layers,
-    #         self.config.NUM_PROCESSES,
-    #         self.config.MODEL.STATE_ENCODER.hidden_size,
-    #         device=self.device,
-    #     )
-    #     prev_actions = torch.zeros(
-    #         self.config.NUM_PROCESSES, 1, device=self.device, dtype=torch.long
-    #     )
-    #     not_done_masks = torch.zeros(self.config.NUM_PROCESSES, 1, device=self.device)
-
-    #     observations = self.envs.reset()
-    #     observations = transform_obs(
-    #         observations, self.config.TASK_CONFIG.TASK.INSTRUCTION_SENSOR_UUID, is_bert=self.config.MODEL.INSTRUCTION_ENCODER.is_bert
-    #     )
-    #     batch = batch_obs(observations, self.device)
-
-    #     episodes = [[] for _ in range(self.envs.num_envs)]
-    #     skips = [False for _ in range(self.envs.num_envs)]
-    #     # Populate dones with False initially
-    #     dones = [False for _ in range(self.envs.num_envs)]
-
-    #     # https://arxiv.org/pdf/1011.0686.pdf
-    #     # Theoretically, any beta function is fine so long as it converges to
-    #     # zero as data_it -> inf. The paper suggests starting with beta = 1 and
-    #     # exponential decay.
-    #     if self.config.DAGGER.P == 0.0:
-    #         # in Python 0.0 ** 0.0 == 1.0, but we want 0.0
-    #         beta = 0.0
-    #     else:
-    #         beta = self.config.DAGGER.P ** data_it
-
-    #     ensure_unique_episodes = beta == 1.0
-
-    #     def hook_builder(tgt_tensor):
-    #         def hook(m, i, o):
-    #             tgt_tensor.set_(o.cpu())
-
-    #         return hook
-
-    #     rgb_features = None
-    #     rgb_hook = None
-    #     if self.config.MODEL.RGB_ENCODER.cnn_type == "TorchVisionResNet50":
-    #         rgb_features = torch.zeros((1,), device="cpu")
-    #         rgb_hook = self.actor_critic.net.rgb_encoder.layer_extract.register_forward_hook(
-    #             hook_builder(rgb_features)
-    #         )
-
-    #     depth_features = None
-    #     depth_hook = None
-    #     if self.config.MODEL.DEPTH_ENCODER.cnn_type == "VlnResnetDepthEncoder":
-    #         depth_features = torch.zeros((1,), device="cpu")
-    #         depth_hook = self.actor_critic.net.depth_encoder.visual_encoder.register_forward_hook(
-    #             hook_builder(depth_features)
-    #         )
-
-    #     collected_eps = 0
-    #     if ensure_unique_episodes:
-    #         ep_ids_collected = set(
-    #             [ep.episode_id for ep in self.envs.current_episodes()]
-    #         )
-
-    #     with tqdm.tqdm(total=self.config.DAGGER.UPDATE_SIZE) as pbar, lmdb.open(
-    #         self.lmdb_features_dir, map_size=int(self.config.DAGGER.LMDB_MAP_SIZE)
-    #     ) as lmdb_env, torch.no_grad():
-    #         start_id = lmdb_env.stat()["entries"]
-    #         txn = lmdb_env.begin(write=True)
-
-    #         while collected_eps < self.config.DAGGER.UPDATE_SIZE:
-    #             if ensure_unique_episodes:
-    #                 envs_to_pause = []
-    #                 current_episodes = self.envs.current_episodes()
-
-    #             for i in range(self.envs.num_envs):
-    #                 if dones[i] and not skips[i]:
-    #                     ep = episodes[i]
-    #                     traj_obs = batch_obs(
-    #                         [step[0] for step in ep], device=torch.device("cpu")
-    #                     )
-    #                     del traj_obs["vln_oracle_action_sensor"]
-    #                     for k, v in traj_obs.items():
-    #                         traj_obs[k] = v.numpy()
-
-    #                     transposed_ep = [
-    #                         traj_obs,
-    #                         np.array([step[1] for step in ep], dtype=np.int64),
-    #                         np.array([step[2] for step in ep], dtype=np.int64),
-    #                     ]
-    #                     txn.put(
-    #                         str(start_id + collected_eps).encode(),
-    #                         msgpack_numpy.packb(transposed_ep, use_bin_type=True),
-    #                     )
-
-    #                     pbar.update()
-    #                     collected_eps += 1
-
-    #                     if (
-    #                         collected_eps % self.config.DAGGER.LMDB_COMMIT_FREQUENCY
-    #                     ) == 0:
-    #                         txn.commit()
-    #                         txn = lmdb_env.begin(write=True)
-
-    #                     if ensure_unique_episodes:
-    #                         if current_episodes[i].episode_id in ep_ids_collected:
-    #                             envs_to_pause.append(i)
-    #                         else:
-    #                             ep_ids_collected.add(current_episodes[i].episode_id)
-
-    #                 if dones[i]:
-    #                     episodes[i] = []
-
-    #             if ensure_unique_episodes:
-    #                 (
-    #                     self.envs,
-    #                     recurrent_hidden_states,
-    #                     not_done_masks,
-    #                     prev_actions,
-    #                     batch,
-    #                 ) = self._pause_envs(
-    #                     envs_to_pause,
-    #                     self.envs,
-    #                     recurrent_hidden_states,
-    #                     not_done_masks,
-    #                     prev_actions,
-    #                     batch,
-    #                 )
-    #                 if self.envs.num_envs == 0:
-    #                     break
-
-    #             (_, actions, _, recurrent_hidden_states) = self.actor_critic.act(
-    #                 batch,
-    #                 recurrent_hidden_states,
-    #                 prev_actions,
-    #                 not_done_masks,
-    #                 deterministic=False,
-    #             )
-    #             actions = torch.where(
-    #                 torch.rand_like(actions, dtype=torch.float) < beta,
-    #                 batch["vln_oracle_action_sensor"].long(),
-    #                 actions,
-    #             )
-
-    #             for i in range(self.envs.num_envs):
-    #                 if rgb_features is not None:
-    #                     observations[i]["rgb_features"] = rgb_features[i]
-    #                     del observations[i]["rgb"]
-
-    #                 if depth_features is not None:
-    #                     observations[i]["depth_features"] = depth_features[i]
-    #                     del observations[i]["depth"]
-
-    #                 episodes[i].append(
-    #                     (
-    #                         observations[i],
-    #                         prev_actions[i].item(),
-    #                         batch["vln_oracle_action_sensor"][i].item(),
-    #                     )
-    #                 )
-
-    #             skips = batch["vln_oracle_action_sensor"].long() == -1
-    #             actions = torch.where(skips, torch.zeros_like(actions), actions)
-    #             skips = skips.squeeze(-1).to(device="cpu", non_blocking=True)
-
-    #             prev_actions.copy_(actions)
-
-    #             outputs = self.envs.step([a[0].item() for a in actions])
-    #             observations, rewards, dones, _ = [list(x) for x in zip(*outputs)]
-
-    #             not_done_masks = torch.tensor(
-    #                 [[0.0] if done else [1.0] for done in dones],
-    #                 dtype=torch.float,
-    #                 device=self.device,
-    #             )
-
-    #             observations = transform_obs(
-    #                 observations, self.config.TASK_CONFIG.TASK.INSTRUCTION_SENSOR_UUID, is_bert=self.config.MODEL.INSTRUCTION_ENCODER.is_bert
-    #             )
-    #             batch = batch_obs(observations, self.device)
-
-    #         txn.commit()
-
-    #     self.envs.close()
-    #     self.envs = None
-
-    #     if rgb_hook is not None:
-    #         rgb_hook.remove()
-    #     if depth_hook is not None:
-    #         depth_hook.remove()
-
     def _update_agent(
-        self, observations, prev_actions, not_done_masks, corrected_actions, high_recurrent_hidden_states, 
+        self, observations, prev_actions, not_done_masks, corrected_actions, oracle_stop, high_recurrent_hidden_states, 
         low_recurrent_hidden_states
     ):
         # T, N, C = corrected_actions.size()
         self.optimizer_high_level.zero_grad()
         self.optimizer_low_level.zero_grad()
 
-
         high_level_criterion = nn.CrossEntropyLoss(ignore_index=-1, reduction="mean")
         low_level_criterion = nn.MSELoss()
-        # recurrent_hidden_states =[]
-        # recurrent_hidden_states = torch.zeros(
-        #     self.actor_critic.state_encoder.num_recurrent_layers,
-        #     T,
-        #     self.config.MODEL.STATE_ENCODER.hidden_size,
-        #     device=self.device,
-        # )
+        low_level_stop_criterion = nn.BCEWithLogitsLoss()
 
         AuxLosses.clear()
 
@@ -751,7 +565,6 @@ class RoboDaggerTrainer(BaseRLTrainer):
         high_level_loss.backward()
         self.optimizer_high_level.step()
         high_level_loss_data = high_level_loss.detach()
-
         del output
 
         self.low_level.to(self.device2)
@@ -771,7 +584,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 )) 
 
         del observations, prev_actions, not_done_masks
-        output, low_recurrent_hidden_states = self.low_level(batch)
+        output, stop_out, low_recurrent_hidden_states = self.low_level(batch)
 
         corrected_actions = corrected_actions.to(self.device2)
 
@@ -779,15 +592,309 @@ class RoboDaggerTrainer(BaseRLTrainer):
         output = output.masked_fill_(action_mask, 0)
         output = output.to(dtype=torch.float)
         corrected_actions = corrected_actions.to(dtype=torch.float)
-        low_level_loss = low_level_criterion(output, corrected_actions)
+        low_level_action_loss = low_level_criterion(output, corrected_actions)
+
+        mask = (oracle_stop!=-1)
+        oracle_stop = torch.masked_select(oracle_stop, mask)
+        stop_out = torch.masked_select(stop_out, mask)
+        low_level_stop_loss = low_level_stop_criterion(stop_out, oracle_stop)
+        
+
+        low_level_loss = low_level_action_loss + low_level_stop_loss
         low_level_loss.backward()
         self.optimizer_low_level.step()
 
-        low_level_loss_data = low_level_loss.detach()
+        aux_loss_data =0
+
+        # low_level_loss_data = low_level_loss.detach()
+        loss = (high_level_loss_data.item(), low_level_action_loss.detach().item(), 
+                low_level_stop_loss.detach.item(), aux_loss_data)
+        del output, high_level_loss, low_level_loss, low_level_action_loss, low_level_stop_loss
+        return loss, high_recurrent_hidden_states, low_recurrent_hidden_states
+
+    def _update_agent_val(
+        self, observations, prev_actions, not_done_masks, corrected_actions, oracle_stop, high_recurrent_hidden_states, 
+        low_recurrent_hidden_states
+    ):
+
+        high_level_criterion = nn.CrossEntropyLoss(ignore_index=-1, reduction="mean")
+        low_level_criterion = nn.MSELoss()
+        low_level_stop_criterion = nn.BCEWithLogitsLoss()
+
+        AuxLosses.clear()
+
+        high_recurrent_hidden_states = repackage_hidden(high_recurrent_hidden_states)
+        low_recurrent_hidden_states = repackage_hidden(low_recurrent_hidden_states)
+
+        batch = (observations, high_recurrent_hidden_states, prev_actions, not_done_masks)
+        output, high_recurrent_hidden_states = self.high_level(batch)
+        del batch
+        high_level_action_mask = observations['vln_oracle_action_sensor'] ==0
+        output = output.masked_fill_(high_level_action_mask, 0)
+        observations['vln_oracle_action_sensor'] = observations['vln_oracle_action_sensor'].squeeze(1).to(dtype=torch.int64)
+        print("oracle action sensor",observations['vln_oracle_action_sensor'].shape)
+        print("output shape",output.shape)
+        high_level_loss = high_level_criterion(output,observations['vln_oracle_action_sensor'])
+        del output
+
+        self.low_level.to(self.device2)
+        observations = {
+            k: v.to(device=self.device2, non_blocking=True)
+            for k, v in observations.items()
+        }
+        batch = (observations,
+                low_recurrent_hidden_states,
+                prev_actions.to(
+                    device=self.device2, non_blocking=True
+                ),
+                not_done_masks.to(
+                    device=self.device2, non_blocking=True
+                )) 
+
+        del observations, prev_actions, not_done_masks
+        output, stop_out, low_recurrent_hidden_states = self.low_level(batch)
+
+        corrected_actions = corrected_actions.to(self.device2)
+
+        action_mask = corrected_actions==0
+        output = output.masked_fill_(action_mask, 0)
+        output = output.to(dtype=torch.float)
+        corrected_actions = corrected_actions.to(dtype=torch.float)
+        low_level_action_loss = low_level_criterion(output, corrected_actions)
+
+        mask = (oracle_stop!=-1)
+        oracle_stop = torch.masked_select(oracle_stop, mask)
+        stop_out = torch.masked_select(stop_out, mask)
+        low_level_stop_loss = low_level_stop_criterion(stop_out, oracle_stop)
 
         aux_loss_data =0
-        del output, high_level_loss, low_level_loss
-        return high_level_loss_data, low_level_loss_data, aux_loss_data, high_recurrent_hidden_states, low_recurrent_hidden_states
+
+        # low_level_loss_data = low_level_loss.detach()
+        loss = (high_level_loss.item(), low_level_action_loss.item(), 
+                low_level_stop_loss.item(), aux_loss_data)
+        return loss, high_recurrent_hidden_states, low_recurrent_hidden_states
+
+
+    def train_epoch(self, diter, length, batch_size, epoch):
+        loss, action_loss, aux_loss = 0, 0, 0
+        step_id = 0
+        
+        high_level_losses=[]
+        low_level_action_losses =[]
+        low_level_stop_losses =[]
+        low_level_total_losses=[]
+
+        self.high_level.train()
+        self.low_level.train()
+
+        for batch in tqdm.tqdm(
+            diter, total=length // batch_size, leave=False
+        ):
+            (   observations_batch,
+                prev_actions_batch,
+                not_done_masks,
+                corrected_actions_batch,
+                oracle_stop_batch
+            ) = batch
+
+            high_recurrent_hidden_states = torch.zeros(
+                self.high_level.state_encoder.num_recurrent_layers,
+                self.config.DAGGER.BATCH_SIZE,
+                self.config.MODEL.STATE_ENCODER.hidden_size,
+                device=self.device,
+            )
+            low_recurrent_hidden_states = torch.zeros(
+                self.low_level.state_encoder.num_recurrent_layers,
+                self.config.DAGGER.BATCH_SIZE,
+                self.config.MODEL.STATE_ENCODER.hidden_size,
+                device=self.device2,
+            )
+            batch_split = split_batch_tbptt(observations_batch, prev_actions_batch, not_done_masks, 
+                    corrected_actions_batch, oracle_stop_batch, self.config.DAGGER.tbptt_steps, 
+                    self.config.DAGGER.split_dim)
+            del observations_batch, prev_actions_batch, not_done_masks, corrected_actions_batch, batch
+            for split in batch_split:
+                (   observations_batch,
+                    prev_actions_batch,
+                    not_done_masks,
+                    corrected_actions_batch,
+                    oracle_stop_batch
+                ) = split                        
+                observations_batch = {
+                    k: v.to(device=self.device, non_blocking=True)
+                    for k, v in observations_batch.items()
+                }
+                try:
+                    loss, high_recurrent_hidden_states, low_recurrent_hidden_states= self._update_agent(
+                        observations_batch,
+                        prev_actions_batch.to(
+                            device=self.device, non_blocking=True
+                        ),
+                        not_done_masks.to(
+                            device=self.device, non_blocking=True
+                        ),
+                        corrected_actions_batch.to(
+                            device=self.device, non_blocking=True
+                        ),
+                        oracle_stop_batch.to(
+                                device=self.device, non_blocking=True
+                        ),
+                        high_recurrent_hidden_states,
+                        low_recurrent_hidden_states,
+                    )
+                    high_level_losses.append(loss[0])
+                    low_level_action_losses.append(loss[1])
+                    low_level_stop_losses.append(loss[2])
+                    low_level_total_losses.append(loss[1] + loss[2])
+                    aux_loss += loss[3]
+                except:
+                    logger.info(
+                        "ERROR: failed to update agent. Updating agent with batch size of 1."
+                    )
+                    loss, action_loss, aux_loss = 0, 0, 0
+                    prev_actions_batch = prev_actions_batch.cpu()
+                    not_done_masks = not_done_masks.cpu()
+                    corrected_actions_batch = corrected_actions_batch.cpu()
+                    weights_batch = weights_batch.cpu()
+                    observations_batch = {
+                        k: v.cpu() for k, v in observations_batch.items()
+                    }
+
+                    for i in range(not_done_masks.size(0)):
+                        output = self._update_agent(
+                            {
+                                k: v[i].to(
+                                    device=self.device, non_blocking=True
+                                )
+                                for k, v in observations_batch.items()
+                            },
+                            prev_actions_batch[i].to(
+                                device=self.device, non_blocking=True
+                            ),
+                            not_done_masks[i].to(
+                                device=self.device, non_blocking=True
+                            ),
+                            corrected_actions_batch[i].to(
+                                device=self.device, non_blocking=True
+                            ),
+                            weights_batch[i].to(
+                                device=self.device, non_blocking=True
+                            ),
+                        )
+                        loss += output[0]
+                        action_loss += output[1]
+                        aux_loss += output[2]
+
+                # # For CyclicalLR
+                # self.scheduler.step()
+
+            logger.info(f"train_high_level_action_loss: {np.mean(high_level_losses)}")
+            logger.info(f"train_low_level_action_loss: {np.mean(low_level_action_losses)}")
+            logger.info(f"Train_low_level_stop_loss: {np.mean(low_level_stop_losses)}")
+            logger.info(f"Train_combined_loss: {np.mean(low_level_total_losses)}")
+            logger.info(f"train_aux_loss: {aux_loss}")
+            logger.info(f"Batches processed: {step_id}.")
+            logger.info(f"Epoch {epoch}.")
+            wandb.log({
+            "Train High Level Action Loss": np.mean(high_level_losses),
+            "Train Low Level Action Loss": np.mean(low_level_action_losses),
+            "Train Low Level Stop Loss": np.mean(low_level_stop_losses),
+            "Train Low_level Total Loss": np.mean(low_level_total_losses),
+            "Test Aux Loss": aux_loss})
+            step_id += 1
+
+        self.save_checkpoint(
+            f"ckpt.{self.config.DAGGER.EPOCHS + epoch}.pth"
+        )
+
+    def val_epoch(self, diter, length, batch_size, epoch):
+        loss, aux_loss = 0, 0, 0
+        step_id = 0
+        high_level_losses=[]
+        low_level_total_losses=[]
+        val_losses =[]
+
+        self.high_level.eval()
+        self.low_level.eval()
+        with torch.no_grad():
+            for batch in tqdm.tqdm(
+                diter, total=length // batch_size, leave=False
+            ):
+                (   observations_batch,
+                    prev_actions_batch,
+                    not_done_masks,
+                    corrected_actions_batch,
+                    oracle_stop_batch
+                ) = batch
+
+                high_recurrent_hidden_states = torch.zeros(
+                    self.high_level.state_encoder.num_recurrent_layers,
+                    self.config.DAGGER.BATCH_SIZE,
+                    self.config.MODEL.STATE_ENCODER.hidden_size,
+                    device=self.device,
+                )
+                low_recurrent_hidden_states = torch.zeros(
+                    self.low_level.state_encoder.num_recurrent_layers,
+                    self.config.DAGGER.BATCH_SIZE,
+                    self.config.MODEL.STATE_ENCODER.hidden_size,
+                    device=self.device2,
+                )
+                batch_split = split_batch_tbptt(observations_batch, prev_actions_batch, not_done_masks, 
+                        corrected_actions_batch, oracle_stop_batch, self.config.DAGGER.tbptt_steps, 
+                        self.config.DAGGER.split_dim)
+                del observations_batch, prev_actions_batch, not_done_masks, corrected_actions_batch, batch
+                for split in batch_split:
+                    (   observations_batch,
+                        prev_actions_batch,
+                        not_done_masks,
+                        corrected_actions_batch,
+                        oracle_stop_batch
+                    ) = split                        
+                    observations_batch = {
+                        k: v.to(device=self.device, non_blocking=True)
+                        for k, v in observations_batch.items()
+                    }
+                    loss, high_recurrent_hidden_states, low_recurrent_hidden_states= self._update_agent_val(
+                        observations_batch,
+                        prev_actions_batch.to(
+                            device=self.device, non_blocking=True
+                        ),
+                        not_done_masks.to(
+                            device=self.device, non_blocking=True
+                        ),
+                        corrected_actions_batch.to(
+                            device=self.device, non_blocking=True
+                        ),
+                        oracle_stop_batch.to(
+                                device=self.device, non_blocking=True
+                        ),
+                        high_recurrent_hidden_states,
+                        low_recurrent_hidden_states,
+                    )
+                    high_level_losses.append(loss[0])
+                    # low_level_action_losses.append(loss[1])
+                    # low_level_stop_losses.append(loss[2])
+                    low_level_total_losses.append(loss[1] + loss[2])
+                    aux_loss += loss[3]
+
+                    # # For CyclicalLR
+                    # self.scheduler.step()
+
+                logger.info(f"val_high_level_action_loss: {np.mean(high_level_losses)}")
+                # logger.info(f"train_low_level_action_loss: {np.mean(low_level_action_losses)}")
+                # logger.info(f"Train_low_level_stop_loss: {np.mean(low_level_stop_losses)}")
+                logger.info(f"Val_low_level_total_loss: {np.mean(low_level_total_losses)}")
+                logger.info(f"train_aux_loss: {aux_loss}")
+                logger.info(f"Batches processed: {step_id}.")
+                logger.info(f"Epoch {epoch}.")
+                wandb.log({
+                "Train High Level Action Loss": np.mean(high_level_losses),
+                "Train Low_level Total Loss": np.mean(low_level_total_losses),
+                "Test Aux Loss": aux_loss})
+                val_losses.append(np.mean(low_level_total_losses))
+                step_id += 1
+            wandb.log({
+            "Val Loss epoch": np.mean(val_losses)})
 
     def train(self) -> None:
         r"""Main method for training DAgger.
@@ -801,6 +908,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         if self.config.DAGGER.PRELOAD_LMDB_FEATURES:
             try:
                 lmdb.open(self.lmdb_features_dir, readonly=True)
+                lmdb.open(self.lmdb_eval_dir, readonly=True)
             except lmdb.Error as err:
                 logger.error("Cannot open database for teacher forcing preload.")
                 raise err
@@ -896,161 +1004,180 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     num_workers=3,
                 )
 
+                dataset_eval = IWTrajectoryDataset(
+                    self.lmdb_eval_dir,
+                    self.config.DAGGER.USE_IW,
+                    inflection_weight_coef=self.config.MODEL.inflection_weight_coef,
+                    lmdb_map_size=self.config.DAGGER.LMDB_EVAL_SIZE,
+                    batch_size=self.config.DAGGER.BATCH_SIZE,
+                    is_bert = self.config.MODEL.INSTRUCTION_ENCODER.is_bert,
+                )
+                diter_eval = torch.utils.data.DataLoader(
+                    dataset_eval,
+                    batch_size=self.config.DAGGER.BATCH_SIZE,
+                    shuffle=False,
+                    collate_fn=collate_fn,
+                    pin_memory=False,
+                    drop_last=True,  # drop last batch if smaller
+                    num_workers=3,
+                )
+
                 AuxLosses.activate()
                 print("starting training loop")
                 for epoch in tqdm.trange(self.config.DAGGER.EPOCHS):
-                    for batch in tqdm.tqdm(
-                        diter, total=dataset.length // dataset.batch_size, leave=False
-                    ):
+                    self.train_epoch(diter, dataset.length, dataset.batch_size, epoch)
+                    # for batch in tqdm.tqdm(
+                    #     diter, total=dataset.length // dataset.batch_size, leave=False
+                    # ):
 
-                        (   observations_batch,
-                            prev_actions_batch,
-                            not_done_masks,
-                            corrected_actions_batch,
-                        ) = batch
+                    #     (   observations_batch,
+                    #         prev_actions_batch,
+                    #         not_done_masks,
+                    #         corrected_actions_batch,
+                    #     ) = batch
 
-                        high_recurrent_hidden_states = torch.zeros(
-                            self.high_level.state_encoder.num_recurrent_layers,
-                            self.config.DAGGER.BATCH_SIZE,
-                            self.config.MODEL.STATE_ENCODER.hidden_size,
-                            device=self.device,
-                        )
-                        low_recurrent_hidden_states = torch.zeros(
-                            self.low_level.state_encoder.num_recurrent_layers,
-                            self.config.DAGGER.BATCH_SIZE,
-                            self.config.MODEL.STATE_ENCODER.hidden_size,
-                            device=self.device2,
-                        )
+                    #     high_recurrent_hidden_states = torch.zeros(
+                    #         self.high_level.state_encoder.num_recurrent_layers,
+                    #         self.config.DAGGER.BATCH_SIZE,
+                    #         self.config.MODEL.STATE_ENCODER.hidden_size,
+                    #         device=self.device,
+                    #     )
+                    #     low_recurrent_hidden_states = torch.zeros(
+                    #         self.low_level.state_encoder.num_recurrent_layers,
+                    #         self.config.DAGGER.BATCH_SIZE,
+                    #         self.config.MODEL.STATE_ENCODER.hidden_size,
+                    #         device=self.device2,
+                    #     )
 
                         
 
-                        batch_split = split_batch_tbptt(observations_batch, prev_actions_batch, not_done_masks, 
-                                                        corrected_actions_batch, self.config.DAGGER.tbptt_steps, 
-                                                        self.config.DAGGER.split_dim)
+                    #     batch_split = split_batch_tbptt(observations_batch, prev_actions_batch, not_done_masks, 
+                    #                                     corrected_actions_batch, self.config.DAGGER.tbptt_steps, 
+                    #                                     self.config.DAGGER.split_dim)
 
-                        del observations_batch, prev_actions_batch, not_done_masks, corrected_actions_batch, batch
+                    #     del observations_batch, prev_actions_batch, not_done_masks, corrected_actions_batch, batch
                         
-                        for split in batch_split:
-                            (   observations_batch,
-                                prev_actions_batch,
-                                not_done_masks,
-                                corrected_actions_batch,
-                            ) = split                        
-                        # for split in batch_split:
-                        #     (   observations_batch,
-                        #         prev_actions_batch,
-                        #         not_done_masks,
-                        #         corrected_actions_batch,
-                        #     ) = repackage_mini_batch(split)
+                    #     for split in batch_split:
+                    #         (   observations_batch,
+                    #             prev_actions_batch,
+                    #             not_done_masks,
+                    #             corrected_actions_batch,
+                    #         ) = split                        
+                    #     # for split in batch_split:
+                    #     #     (   observations_batch,
+                    #     #         prev_actions_batch,
+                    #     #         not_done_masks,
+                    #     #         corrected_actions_batch,
+                    #     #     ) = repackage_mini_batch(split)
 
-                            observations_batch = {
-                                k: v.to(device=self.device, non_blocking=True)
-                                for k, v in observations_batch.items()
-                            }
-                            try:
-                                hl_loss, ll_loss, aux_loss, high_recurrent_hidden_states, low_recurrent_hidden_states= self._update_agent(
-                                    observations_batch,
-                                    prev_actions_batch.to(
-                                        device=self.device, non_blocking=True
-                                    ),
-                                    not_done_masks.to(
-                                        device=self.device, non_blocking=True
-                                    ),
-                                    corrected_actions_batch.to(
-                                        device=self.device, non_blocking=True
-                                    ),
-                                    high_recurrent_hidden_states,
-                                    low_recurrent_hidden_states,
-                                )
-                            except:
-                                logger.info(
-                                    "ERROR: failed to update agent. Updating agent with batch size of 1."
-                                )
-                                loss, action_loss, aux_loss = 0, 0, 0
-                                prev_actions_batch = prev_actions_batch.cpu()
-                                not_done_masks = not_done_masks.cpu()
-                                corrected_actions_batch = corrected_actions_batch.cpu()
-                                weights_batch = weights_batch.cpu()
-                                observations_batch = {
-                                    k: v.cpu() for k, v in observations_batch.items()
-                                }
+                    #         observations_batch = {
+                    #             k: v.to(device=self.device, non_blocking=True)
+                    #             for k, v in observations_batch.items()
+                    #         }
+                    #         try:
+                    #             hl_loss, ll_loss, aux_loss, high_recurrent_hidden_states, low_recurrent_hidden_states= self._update_agent(
+                    #                 observations_batch,
+                    #                 prev_actions_batch.to(
+                    #                     device=self.device, non_blocking=True
+                    #                 ),
+                    #                 not_done_masks.to(
+                    #                     device=self.device, non_blocking=True
+                    #                 ),
+                    #                 corrected_actions_batch.to(
+                    #                     device=self.device, non_blocking=True
+                    #                 ),
+                    #                 high_recurrent_hidden_states,
+                    #                 low_recurrent_hidden_states,
+                    #             )
+                    #         except:
+                    #             logger.info(
+                    #                 "ERROR: failed to update agent. Updating agent with batch size of 1."
+                    #             )
+                    #             loss, action_loss, aux_loss = 0, 0, 0
+                    #             prev_actions_batch = prev_actions_batch.cpu()
+                    #             not_done_masks = not_done_masks.cpu()
+                    #             corrected_actions_batch = corrected_actions_batch.cpu()
+                    #             weights_batch = weights_batch.cpu()
+                    #             observations_batch = {
+                    #                 k: v.cpu() for k, v in observations_batch.items()
+                    #             }
 
-                                for i in range(not_done_masks.size(0)):
-                                    output = self._update_agent(
-                                        {
-                                            k: v[i].to(
-                                                device=self.device, non_blocking=True
-                                            )
-                                            for k, v in observations_batch.items()
-                                        },
-                                        prev_actions_batch[i].to(
-                                            device=self.device, non_blocking=True
-                                        ),
-                                        not_done_masks[i].to(
-                                            device=self.device, non_blocking=True
-                                        ),
-                                        corrected_actions_batch[i].to(
-                                            device=self.device, non_blocking=True
-                                        ),
-                                        weights_batch[i].to(
-                                            device=self.device, non_blocking=True
-                                        ),
-                                    )
-                                    loss += output[0]
-                                    action_loss += output[1]
-                                    aux_loss += output[2]
+                    #             for i in range(not_done_masks.size(0)):
+                    #                 output = self._update_agent(
+                    #                     {
+                    #                         k: v[i].to(
+                    #                             device=self.device, non_blocking=True
+                    #                         )
+                    #                         for k, v in observations_batch.items()
+                    #                     },
+                    #                     prev_actions_batch[i].to(
+                    #                         device=self.device, non_blocking=True
+                    #                     ),
+                    #                     not_done_masks[i].to(
+                    #                         device=self.device, non_blocking=True
+                    #                     ),
+                    #                     corrected_actions_batch[i].to(
+                    #                         device=self.device, non_blocking=True
+                    #                     ),
+                    #                     weights_batch[i].to(
+                    #                         device=self.device, non_blocking=True
+                    #                     ),
+                    #                 )
+                    #                 loss += output[0]
+                    #                 action_loss += output[1]
+                    #                 aux_loss += output[2]
 
-                            # # For CyclicalLR
-                            # self.scheduler.step()
+                    #         # # For CyclicalLR
+                    #         # self.scheduler.step()
 
-                        # logger.info(f"train_high_level_loss: {hl_loss}")
-                        # logger.info(f"train_low_level_loss: {ll_loss}")
-                        # logger.info(f"train_action_loss: {action_loss}")
-                        logger.info(f"train_aux_loss: {aux_loss}")
-                        logger.info(f"Batches processed: {step_id}.")
-                        logger.info(f"On DAgger iter {dagger_it}, Epoch {epoch}.")
-                        writer.add_scalar(f"train_high_level_loss_iter_{dagger_it}", hl_loss, step_id)
-                        writer.add_scalar(f"train_low_level_loss_iter_{dagger_it}", ll_loss, step_id)
-                        # writer.add_scalar(
-                        #     f"train_action_loss_iter_{dagger_it}", action_loss, step_id
-                        # )
+                    #     # logger.info(f"train_high_level_loss: {hl_loss}")
+                    #     # logger.info(f"train_low_level_loss: {ll_loss}")
+                    #     # logger.info(f"train_action_loss: {action_loss}")
+                    #     logger.info(f"train_aux_loss: {aux_loss}")
+                    #     logger.info(f"Batches processed: {step_id}.")
+                    #     logger.info(f"On DAgger iter {dagger_it}, Epoch {epoch}.")
+                    #     writer.add_scalar(f"train_high_level_loss_iter_{dagger_it}", hl_loss, step_id)
+                    #     writer.add_scalar(f"train_low_level_loss_iter_{dagger_it}", ll_loss, step_id)
+                    #     # writer.add_scalar(
+                    #     #     f"train_action_loss_iter_{dagger_it}", action_loss, step_id
+                    #     # )
 
-                        # h1 = nvmlDeviceGetHandleByIndex(0)
-                        # info1 = nvmlDeviceGetMemoryInfo(h1)
+                    #     # h1 = nvmlDeviceGetHandleByIndex(0)
+                    #     # info1 = nvmlDeviceGetMemoryInfo(h1)
 
-                        # h2 = nvmlDeviceGetHandleByIndex(1)
-                        # info2 = nvmlDeviceGetMemoryInfo(h2)
+                    #     # h2 = nvmlDeviceGetHandleByIndex(1)
+                    #     # info2 = nvmlDeviceGetMemoryInfo(h2)
 
-                        # h3 = nvmlDeviceGetHandleByIndex(2)
-                        # info3 = nvmlDeviceGetMemoryInfo(h3)
-                        writer.add_scalar(
-                            f"train_aux_loss_iter_{dagger_it}", aux_loss, step_id
-                        )
-                        # writer.add_scalar(
-                        #     f"GPU_0_mem_usage_{dagger_it}", info1.used, step_id
-                        # )
-                        # writer.add_scalar(
-                        #     f"GPU_1_mem_usage_{dagger_it}", info2.used, step_id
-                        # )
-                        # writer.add_scalar(
-                        #     f"GPU_2_mem_usage_{dagger_it}", info3.used, step_id
-                        # )
-                        writer.add_scalar(
-                            f"Cache_0_mem_usage_{dagger_it}", torch.cuda.memory_cached(0), step_id
-                        )
-                        # writer.add_scalar(
-                        #     f"Cache_1_mem_usage_{dagger_it}", torch.cuda.memory_cached(1), step_id
-                        # )
-                        # writer.add_scalar(
-                        #     f"Cache_2_mem_usage_{dagger_it}", torch.cuda.memory_cached(2), step_id
-                        # )
-                        # torch.cuda.empty_cache() 
-                        step_id += 1
-                        # end = time.time()
+                    #     # h3 = nvmlDeviceGetHandleByIndex(2)
+                    #     # info3 = nvmlDeviceGetMemoryInfo(h3)
+                    #     writer.add_scalar(
+                    #         f"train_aux_loss_iter_{dagger_it}", aux_loss, step_id
+                    #     )
+                    #     # writer.add_scalar(
+                    #     #     f"GPU_0_mem_usage_{dagger_it}", info1.used, step_id
+                    #     # )
+                    #     # writer.add_scalar(
+                    #     #     f"GPU_1_mem_usage_{dagger_it}", info2.used, step_id
+                    #     # )
+                    #     # writer.add_scalar(
+                    #     #     f"GPU_2_mem_usage_{dagger_it}", info3.used, step_id
+                    #     # )
+                    #     writer.add_scalar(
+                    #         f"Cache_0_mem_usage_{dagger_it}", torch.cuda.memory_cached(0), step_id
+                    #     )
+                    #     # writer.add_scalar(
+                    #     #     f"Cache_1_mem_usage_{dagger_it}", torch.cuda.memory_cached(1), step_id
+                    #     # )
+                    #     # writer.add_scalar(
+                    #     #     f"Cache_2_mem_usage_{dagger_it}", torch.cuda.memory_cached(2), step_id
+                    #     # )
+                    #     # torch.cuda.empty_cache() 
+                    #     step_id += 1
+                    #     # end = time.time()
 
-                    self.save_checkpoint(
-                        f"ckpt.{dagger_it * self.config.DAGGER.EPOCHS + epoch}.pth"
-                    )
+                    # self.save_checkpoint(
+                    #     f"ckpt.{dagger_it * self.config.DAGGER.EPOCHS + epoch}.pth"
+                    # )
                 AuxLosses.deactivate()
 
     @staticmethod
