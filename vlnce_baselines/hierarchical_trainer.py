@@ -62,7 +62,7 @@ with warnings.catch_warnings():
 #WandB – Login to your wandb account so you can log all your metrics
 wandb.login()
 
-wandb.init(project="Robo_VLN_Base_Hierarchical_w_glove")
+wandb.init(project="Robo_VLN_Hierarchical_Base_w_glove", reinit=True)
 
 wb_config = wandb.config
 wb_config.LR = 1e-4
@@ -558,9 +558,9 @@ class RoboDaggerTrainer(BaseRLTrainer):
         high_level_action_mask = observations['vln_oracle_action_sensor'] ==0
         output = output.masked_fill_(high_level_action_mask, 0)
         observations['vln_oracle_action_sensor'] = observations['vln_oracle_action_sensor'].squeeze(1).to(dtype=torch.int64)
-        print("oracle action sensor",observations['vln_oracle_action_sensor'].shape)
-        print("output shape",output.shape)
-        high_level_loss = high_level_criterion(output,observations['vln_oracle_action_sensor'])
+        # print("oracle action sensor",observations['vln_oracle_action_sensor'].shape)
+        # print("output shape",output.shape)
+        high_level_loss = high_level_criterion(output,(observations['vln_oracle_action_sensor']-1))
 
         high_level_loss.backward()
         self.optimizer_high_level.step()
@@ -581,9 +581,11 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 ),
                 not_done_masks.to(
                     device=self.device2, non_blocking=True
-                )) 
+                ),
+                observations['vln_oracle_action_sensor']) 
 
         del observations, prev_actions, not_done_masks
+        oracle_stop = oracle_stop.to(self.device2)
         output, stop_out, low_recurrent_hidden_states = self.low_level(batch)
 
         corrected_actions = corrected_actions.to(self.device2)
@@ -608,8 +610,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
         # low_level_loss_data = low_level_loss.detach()
         loss = (high_level_loss_data.item(), low_level_action_loss.detach().item(), 
-                low_level_stop_loss.detach.item(), aux_loss_data)
-        del output, high_level_loss, low_level_loss, low_level_action_loss, low_level_stop_loss
+                low_level_stop_loss.detach().item(), aux_loss_data)
         return loss, high_recurrent_hidden_states, low_recurrent_hidden_states
 
     def _update_agent_val(
@@ -632,9 +633,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         high_level_action_mask = observations['vln_oracle_action_sensor'] ==0
         output = output.masked_fill_(high_level_action_mask, 0)
         observations['vln_oracle_action_sensor'] = observations['vln_oracle_action_sensor'].squeeze(1).to(dtype=torch.int64)
-        print("oracle action sensor",observations['vln_oracle_action_sensor'].shape)
-        print("output shape",output.shape)
-        high_level_loss = high_level_criterion(output,observations['vln_oracle_action_sensor'])
+        high_level_loss = high_level_criterion(output,(observations['vln_oracle_action_sensor']-1))
         del output
 
         self.low_level.to(self.device2)
@@ -649,9 +648,11 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 ),
                 not_done_masks.to(
                     device=self.device2, non_blocking=True
-                )) 
+                ),
+                observations['vln_oracle_action_sensor']) 
 
         del observations, prev_actions, not_done_masks
+        oracle_stop = oracle_stop.to(self.device2)
         output, stop_out, low_recurrent_hidden_states = self.low_level(batch)
 
         corrected_actions = corrected_actions.to(self.device2)
@@ -808,7 +809,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         )
 
     def val_epoch(self, diter, length, batch_size, epoch):
-        loss, aux_loss = 0, 0, 0
+        loss, aux_loss = 0, 0
         step_id = 0
         high_level_losses=[]
         low_level_total_losses=[]
@@ -888,13 +889,13 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 logger.info(f"Batches processed: {step_id}.")
                 logger.info(f"Epoch {epoch}.")
                 wandb.log({
-                "Train High Level Action Loss": np.mean(high_level_losses),
-                "Train Low_level Total Loss": np.mean(low_level_total_losses),
-                "Test Aux Loss": aux_loss})
+                "Val High Level Action Loss": np.mean(high_level_losses),
+                "Val Low_level Total Loss": np.mean(low_level_total_losses),
+                "Val Aux Loss": aux_loss})
                 val_losses.append(np.mean(low_level_total_losses))
                 step_id += 1
             wandb.log({
-            "Val Loss epoch": np.mean(val_losses)})
+            "Val Loss epoch": np.mean(val_losses),"epoch":epoch })
 
     def train(self) -> None:
         r"""Main method for training DAgger.
@@ -1026,6 +1027,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 print("starting training loop")
                 for epoch in tqdm.trange(self.config.DAGGER.EPOCHS):
                     self.train_epoch(diter, dataset.length, dataset.batch_size, epoch)
+                    self.val_epoch(diter_eval, dataset_eval.length, dataset_eval.batch_size, epoch)
                     # for batch in tqdm.tqdm(
                     #     diter, total=dataset.length // dataset.batch_size, leave=False
                     # ):
@@ -1245,7 +1247,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         config.freeze()
 
         # setup agent
-        self.envs =  construct_env(self.config)
+        self.envs =  construct_env(config)
         self.device = (
             torch.device("cuda", config.TORCH_GPU_ID)
             if torch.cuda.is_available()
@@ -1253,6 +1255,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         )
 
         self._setup_actor_critic_agent(config.MODEL, True, checkpoint_path)
+        self.low_level.to(self.device)
 
         vc = habitat_sim.physics.VelocityControl()
         vc.controlling_lin_vel = True
@@ -1264,17 +1267,18 @@ class RoboDaggerTrainer(BaseRLTrainer):
         observations = transform_obs(
             observations, config.TASK_CONFIG.TASK.INSTRUCTION_SENSOR_UUID, is_bert=self.config.MODEL.INSTRUCTION_ENCODER.is_bert
         )
-
-        # observations = {
-        #     k: torch.tensor(v).to(device=self.device, non_blocking=True)
-        #     for k, v in observations.items()
-        # }
         observations = batch_obs(observations, self.device)
         # batch["instruction_batch"] = batch['instruction']
         # del batch['instruction']
 
-        eval_recurrent_hidden_states = torch.zeros(
-            self.actor_critic.state_encoder.num_recurrent_layers,
+        high_recurrent_hidden_states = torch.zeros(
+            self.high_level.state_encoder.num_recurrent_layers,
+            self.config.NUM_PROCESSES,
+            self.config.MODEL.STATE_ENCODER.hidden_size,
+            device=self.device,
+        )
+        low_recurrent_hidden_states = torch.zeros(
+            self.low_level.state_encoder.num_recurrent_layers,
             self.config.NUM_PROCESSES,
             self.config.MODEL.STATE_ENCODER.hidden_size,
             device=self.device,
@@ -1295,7 +1299,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
             attention_weights = [[] for _ in range(config.NUM_PROCESSES)]
             save_actions = [[] for _ in range(config.NUM_PROCESSES)]
 
-        self.actor_critic.eval()
+        self.high_level.eval()
+        self.low_level.eval()
         k=0
         ep_count = 0
         min_2nd_dim = 1000
@@ -1312,19 +1317,15 @@ class RoboDaggerTrainer(BaseRLTrainer):
             # print("--------------------------------------------")
             is_done = False
             with torch.no_grad():
-                batch = (observations, eval_recurrent_hidden_states, prev_actions, not_done_masks)
-                output, eval_recurrent_hidden_states = self.actor_critic(batch)
-                # (_, actions, _, eval_recurrent_hidden_states) = self.actor_critic.act(
-                #     batch,
-                #     eval_recurrent_hidden_states,
-                #     prev_actions,
-                #     not_done_masks,
-                #     deterministic=True,
-                # )
+                batch = (observations, high_recurrent_hidden_states, prev_actions, not_done_masks)
+                output, high_recurrent_hidden_states = self.high_level(batch)
+                pred = torch.argmax(output, dim=1)
+                batch = (observations, low_recurrent_hidden_states,prev_actions, not_done_masks,pred) 
+                output, stop_out, low_recurrent_hidden_states = self.low_level(batch)
                 prev_actions = output
 
             not_done_masks = torch.ones(config.NUM_PROCESSES, 2, device=self.device)
-
+            lin_vel = output[:, 0]
             # print("Loop:", k, "hidden states shape:", eval_recurrent_hidden_states.shape)
 
             # print("output",output)
@@ -1335,7 +1336,13 @@ class RoboDaggerTrainer(BaseRLTrainer):
             vc.angular_velocity = mn.Vector3(0, np.clip(output[:,1].cpu().numpy(), -max_turn_speed, max_turn_speed), 0)
             observations, _, done, info = self.envs.step(vc) 
             episode_over, success = done
-            is_done = episode_over or success 
+
+            stop_pred = torch.round(torch.sigmoid(stop_out))
+            # print("success",success)
+            # print("lin_vel", lin_vel)
+            # print("stop_pred", stop_pred)
+            episode_success = success and (lin_vel<0.25 or stop_pred ==1)
+            is_done = episode_over or episode_success 
             steps+=1
 
             if len(config.VIDEO_OPTION) > 0:
@@ -1393,8 +1400,14 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 )
                 not_done_masks = torch.zeros(config.NUM_PROCESSES, 2, device=self.device)
 
-                eval_recurrent_hidden_states = torch.zeros(
-                    self.actor_critic.state_encoder.num_recurrent_layers,
+                high_recurrent_hidden_states = torch.zeros(
+                    self.high_level.state_encoder.num_recurrent_layers,
+                    self.config.NUM_PROCESSES,
+                    self.config.MODEL.STATE_ENCODER.hidden_size,
+                    device=self.device,
+                )
+                low_recurrent_hidden_states = torch.zeros(
+                    self.low_level.state_encoder.num_recurrent_layers,
                     self.config.NUM_PROCESSES,
                     self.config.MODEL.STATE_ENCODER.hidden_size,
                     device=self.device,
@@ -1417,7 +1430,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     )
                     del stats_episodes[current_episode.episode_id]["top_down_map"]
                     rgb_frames =[]
-                del stats_episodes[current_episode.episode_id]["top_down_map"]
+                # del stats_episodes[current_episode.episode_id]["top_down_map"]
                 if config.PLOT_ATTENTION:
                     for j in range(len(attention_weights[i])):
                         attention_weights[i][j] = attention_weights[i][j][:,:min_2nd_dim]

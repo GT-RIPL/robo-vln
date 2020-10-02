@@ -73,7 +73,7 @@ class Seq2Seq_LowLevel(nn.Module):
                 device
             )
 
-        self.sub_task_embedding = nn.Embedding(num_sub_tasks, 32)
+        self.sub_task_embedding = nn.Embedding(num_sub_tasks+1, 32, padding_idx=4)
 
         # Init the RNN state decoder
         rnn_input_size = (
@@ -122,7 +122,7 @@ class Seq2Seq_LowLevel(nn.Module):
         rgb_embedding: [batch_size x RGB_ENCODER.output_size]
         """
 
-        observations, rnn_hidden_states, prev_actions, masks = batch
+        observations, rnn_hidden_states, prev_actions, masks, discrete_actions = batch
         del batch
 
         # instructions = self.pad_instructions(observations)
@@ -135,8 +135,12 @@ class Seq2Seq_LowLevel(nn.Module):
             depth_embedding = depth_embedding * 0
         if self.model_config.ablate_rgb:
             rgb_embedding = rgb_embedding * 0
-        sub_tasks_embedding = self.sub_task_embedding(observations['vln_oracle_action_sensor'].view(-1)
-            )
+
+        # discrete_action_mask = discrete_actions ==0
+        # discrete_actions = (discrete_actions-1).masked_fill_(discrete_action_mask, 4)
+
+        # sub_tasks_embedding = self.sub_task_embedding(discrete_actions.view(-1))
+        sub_tasks_embedding = self.sub_task_embedding(discrete_actions)
 
         x = torch.cat([depth_embedding, rgb_embedding, sub_tasks_embedding], dim=1)
         del depth_embedding, rgb_embedding
