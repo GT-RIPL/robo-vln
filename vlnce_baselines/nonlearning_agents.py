@@ -7,7 +7,21 @@ from habitat.config.default import Config
 from habitat.core.agent import Agent
 from habitat.sims.habitat_simulator.actions import HabitatSimActions
 from tqdm import tqdm
+from vlnce_baselines.common.continuous_path_follower import (
+    ContinuousPathFollower,
+    track_waypoint
+    
+)
+import random
+from fastdtw import fastdtw
+import habitat_sim
+import gzip
+from vlnce_baselines.common.env_utils import construct_env
+import wandb
 
+
+def euclidean_distance(position_a, position_b):
+    return np.linalg.norm(np.array(position_b) - np.array(position_a), ord=2)
 
 def evaluate_agent(config: Config):
     split = config.EVAL.SPLIT
@@ -18,7 +32,11 @@ def evaluate_agent(config: Config):
     config.freeze()
     logger.info(config)
 
-    env = Env(config=config.TASK_CONFIG)
+    env = construct_env(config)
+
+    gt_path = config.TASK_CONFIG.TASK.NDTW.GT_PATH.format(split=config.TASK_CONFIG.DATASET.SPLIT)
+    with gzip.open(gt_path, "rt") as f:
+        gt_json = json.load(f)
 
     assert config.EVAL.NONLEARNING.AGENT in [
         "RandomAgent",
@@ -26,57 +44,107 @@ def evaluate_agent(config: Config):
     ], "EVAL.NONLEARNING.AGENT must be either RandomAgent or HandcraftedAgent."
 
     if config.EVAL.NONLEARNING.AGENT == "RandomAgent":
-        agent = RandomAgent()
+        agent = RandomContinuousAgent()
     else:
         agent = HandcraftedAgent()
+    obs = env.reset()
+    agent.reset()
+    steps =0
+    is_done = False
+    stats_episodes = {}  # dict of dicts that stores stats per episode
+    ep_count =0
+    locations=[]
 
-    stats = defaultdict(float)
-    num_episodes = min(config.EVAL.EPISODE_COUNT, len(env.episodes))
-    for i in tqdm(range(num_episodes)):
-        obs = env.reset()
-        agent.reset()
+    vel_control = habitat_sim.physics.VelocityControl()
+    vel_control.controlling_lin_vel = True
+    vel_control.lin_vel_is_local = True
+    vel_control.controlling_ang_vel = True
+    vel_control.ang_vel_is_local = True
 
-        while not env.episode_over:
-            action = agent.act(obs)
-            obs = env.step(action)
+    while (len(stats_episodes) < config.EVAL.EPISODE_COUNT):
+        current_episode = env.habitat_env.current_episode
+        actions = agent.act()
+        vel_control.linear_velocity = np.array([0, 0, -actions[0]])
+        vel_control.angular_velocity = np.array([0, actions[1], 0])
+        _, _, done, info = env.step(vel_control)
+        episode_over, success = done
+        episode_success = success and (actions[0]<0.25)
+        is_done = episode_over or episode_success 
+        steps+=1
 
-        for m, v in env.get_metrics().items():
-            stats[m] += v
+        if is_done or steps==config.TASK_CONFIG.ENVIRONMENT.MAX_EPISODE_STEPS:
+            gt_locations = gt_json[str(current_episode.episode_id)]["locations"]
+            dtw_distance = fastdtw(locations, gt_locations, dist=euclidean_distance)[0]
+            nDTW = np.exp(-dtw_distance / (len(gt_locations) * config.TASK_CONFIG.TASK.NDTW.SUCCESS_DISTANCE))
 
-    stats = {k: v / num_episodes for k, v in stats.items()}
+            locations=[]
+            is_done = False
+            ep_count+=1
+            steps=0
+            print("dones:", done)
+            stats_episodes[current_episode.episode_id] = info
+            stats_episodes[current_episode.episode_id]['ndtw'] = nDTW
+            
+            print("Current episode ID:", current_episode.episode_id)
+            print("Episode Completed:", ep_count)
+            print(" Episode done---------------------------------------------")
+            obs = env.reset()
+            print(stats_episodes[current_episode.episode_id])
 
-    logger.info(f"Averaged benchmark for {config.EVAL.NONLEARNING.AGENT}:")
-    for stat_key in stats.keys():
-        logger.info("{}: {:.3f}".format(stat_key, stats[stat_key]))
-
+    aggregated_stats = {}
+    num_episodes = len(stats_episodes)
+    # print("-----------------------------------------------")
+    # print(stats_episodes.values())
+    for stat_key in next(iter(stats_episodes.values())).keys():
+        # for v in stats_episodes.values():
+        #     print (stat_key, "-------", v[stat_key])
+        aggregated_stats[stat_key] = (
+            sum([v[stat_key] for v in stats_episodes.values()]) / num_episodes
+        )
     with open(f"stats_{config.EVAL.NONLEARNING.AGENT}_{split}.json", "w") as f:
-        json.dump(stats, f, indent=4)
-    return stats
+        json.dump(aggregated_stats, f, indent=4)
 
 
-class RandomAgent(Agent):
+class RandomContinuousAgent(Agent):
     r"""Selects an action at each time step by sampling from the oracle action
     distribution of the training set.
     """
 
-    def __init__(self, probs=None):
-        self.actions = [
-            HabitatSimActions.STOP,
-            HabitatSimActions.MOVE_FORWARD,
-            HabitatSimActions.TURN_LEFT,
-            HabitatSimActions.TURN_RIGHT,
-        ]
-        if probs is not None:
-            self.probs = probs
-        else:
-            self.probs = [0.02, 0.68, 0.15, 0.15]
+    def __init__(self):
+        self.vel =0
+        self.omega=0
 
     def reset(self):
         pass
 
-    def act(self, observations):
-        return {"action": np.random.choice(self.actions, p=self.probs)}
+    def act(self):
+        self.vel =random.random() * 2.0
+        self.omega= (random.random() - 0.5) * 2.0
+        return (self.vel,self.omega)
 
+
+class HandcraftedAgentContinuous(Agent):
+    r"""Agent picks a random heading and takes 37 forward actions (average
+    oracle path length) before calling stop.
+    """
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        # 9.27m avg oracle path length in Train.
+        # Fwd step size: 0.25m. 9.25m/0.25m = 37
+        self.forward_steps = 30
+        self.turns = np.random.randint(0, int(360 / 15) + 1)
+
+    def act(self, observations):
+        if self.turns > 0:
+            self.turns -= 1
+            return {"action": HabitatSimActions.TURN_RIGHT}
+        if self.forward_steps > 0:
+            self.forward_steps -= 1
+            return {"action": HabitatSimActions.MOVE_FORWARD}
+        return {"action": HabitatSimActions.STOP}
 
 class HandcraftedAgent(Agent):
     r"""Agent picks a random heading and takes 37 forward actions (average

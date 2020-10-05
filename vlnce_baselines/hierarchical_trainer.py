@@ -17,6 +17,9 @@ import magnum as mn
 import time
 import quaternion
 from habitat_sim.utils.common import quat_to_magnum, quat_from_magnum
+import apex.amp as amp
+from fastdtw import fastdtw
+import gzip 
 
 import lmdb
 import msgpack_numpy
@@ -62,7 +65,7 @@ with warnings.catch_warnings():
 #WandB – Login to your wandb account so you can log all your metrics
 wandb.login()
 
-wandb.init(project="Robo_VLN_Hierarchical_Base_w_glove", reinit=True)
+wandb.init(project="hierarchical_test_on_Skynet_data", reinit=True)
 
 wb_config = wandb.config
 wb_config.LR = 1e-4
@@ -539,6 +542,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
         self.optimizer_high_level.zero_grad()
         self.optimizer_low_level.zero_grad()
 
+        # self.high_level, self.optimizer_high_level = amp.initialize(self.high_level, self.optimizer_high_level, opt_level="O1")
+        
         high_level_criterion = nn.CrossEntropyLoss(ignore_index=-1, reduction="mean")
         low_level_criterion = nn.MSELoss()
         low_level_stop_criterion = nn.BCEWithLogitsLoss()
@@ -549,11 +554,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         low_recurrent_hidden_states = repackage_hidden(low_recurrent_hidden_states)
 
         batch = (observations, high_recurrent_hidden_states, prev_actions, not_done_masks)
-        # del observations, recurrent_hidden_states, prev_actions, not_done_masks
         output, high_recurrent_hidden_states = self.high_level(batch)
-        # distribution = self.actor_critic.build_distribution(
-        #     observations, recurrent_hidden_states, prev_actions, not_done_masks
-        # )
         del batch
         high_level_action_mask = observations['vln_oracle_action_sensor'] ==0
         output = output.masked_fill_(high_level_action_mask, 0)
@@ -562,18 +563,29 @@ class RoboDaggerTrainer(BaseRLTrainer):
         # print("output shape",output.shape)
         high_level_loss = high_level_criterion(output,(observations['vln_oracle_action_sensor']-1))
 
+
+        # with amp.scale_loss(high_level_loss, self.optimizer_high_level) as scaled_loss:
+        #     scaled_loss.backward()
+
         high_level_loss.backward()
         self.optimizer_high_level.step()
         high_level_loss_data = high_level_loss.detach()
+        # high_level_loss_data = scaled_loss.detach()
         del output
 
         self.low_level.to(self.device2)
+        # self.low_level, self.optimizer_low_level = amp.initialize(self.low_level, self.optimizer_low_level, opt_level="O1")
+
 
         observations = {
             k: v.to(device=self.device2, non_blocking=True)
             for k, v in observations.items()
         }
+        discrete_actions = observations['vln_oracle_action_sensor']
+        discrete_action_mask = discrete_actions ==0
+        discrete_actions = (discrete_actions-1).masked_fill_(discrete_action_mask, 4)
 
+        del observations['vln_oracle_action_sensor']
         batch = (observations,
                 low_recurrent_hidden_states,
                 prev_actions.to(
@@ -582,7 +594,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 not_done_masks.to(
                     device=self.device2, non_blocking=True
                 ),
-                observations['vln_oracle_action_sensor']) 
+                discrete_actions.view(-1)) 
 
         del observations, prev_actions, not_done_masks
         oracle_stop = oracle_stop.to(self.device2)
@@ -603,6 +615,11 @@ class RoboDaggerTrainer(BaseRLTrainer):
         
 
         low_level_loss = low_level_action_loss + low_level_stop_loss
+
+        # with amp.scale_loss(low_level_loss, self.optimizer_low_level) as scaled_loss:
+        #     scaled_loss.backward()
+
+
         low_level_loss.backward()
         self.optimizer_low_level.step()
 
@@ -1002,7 +1019,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     collate_fn=collate_fn,
                     pin_memory=False,
                     drop_last=True,  # drop last batch if smaller
-                    num_workers=3,
+                    num_workers=0,
                 )
 
                 dataset_eval = IWTrajectoryDataset(
@@ -1020,7 +1037,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     collate_fn=collate_fn,
                     pin_memory=False,
                     drop_last=True,  # drop last batch if smaller
-                    num_workers=3,
+                    num_workers=0,
                 )
 
                 AuxLosses.activate()
@@ -1211,6 +1228,9 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
         return (envs, recurrent_hidden_states, not_done_masks, prev_actions, batch)
 
+    def _euclidean_distance(self, position_a, position_b):
+        return np.linalg.norm(np.array(position_b) - np.array(position_a), ord=2)
+
     def _eval_checkpoint(
         self, checkpoint_path: str, writer: TensorboardWriter, checkpoint_index: int = 0
     ) -> None:
@@ -1245,6 +1265,10 @@ class RoboDaggerTrainer(BaseRLTrainer):
             config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
 
         config.freeze()
+
+        gt_path = config.TASK_CONFIG.TASK.NDTW.GT_PATH.format(split=config.TASK_CONFIG.DATASET.SPLIT)
+        with gzip.open(gt_path, "rt") as f:
+            self.gt_json = json.load(f)
 
         # setup agent
         self.envs =  construct_env(config)
@@ -1305,6 +1329,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         ep_count = 0
         min_2nd_dim = 1000
         steps=0
+        locations=[]
         start_time = time.time()
         while (
             len(stats_episodes) < config.EVAL.EPISODE_COUNT
@@ -1316,6 +1341,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
             # # print("Count episodes:", self.envs.count_episodes)
             # print("--------------------------------------------")
             is_done = False
+            locations.append(self.envs.habitat_env._sim.get_agent_state().position.tolist())
             with torch.no_grad():
                 batch = (observations, high_recurrent_hidden_states, prev_actions, not_done_masks)
                 output, high_recurrent_hidden_states = self.high_level(batch)
@@ -1380,6 +1406,13 @@ class RoboDaggerTrainer(BaseRLTrainer):
             #         rgb_frames[i].append(frame)
 
             if is_done or steps==self.config.TASK_CONFIG.ENVIRONMENT.MAX_EPISODE_STEPS:
+                # calulcate NDTW here 
+                gt_locations = self.gt_json[str(current_episode.episode_id)]["locations"]
+                dtw_distance = fastdtw(locations, gt_locations, dist=self._euclidean_distance)[0]
+                nDTW = np.exp(-dtw_distance / (len(gt_locations) * config.TASK_CONFIG.TASK.NDTW.SUCCESS_DISTANCE))
+                # print("dtw time",time.time()-dtw_time)
+                locations=[]
+
                 is_done = False
                 print("Episode complete in steps:", steps)
                 print("single while loop time", time.time()-start_time)
@@ -1387,6 +1420,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 steps=0
                 print("dones:", done)
                 stats_episodes[current_episode.episode_id] = info
+                stats_episodes[current_episode.episode_id]['ndtw'] = nDTW
                 
                 print("Current episode ID:", current_episode.episode_id)
                 print("Episode Completed:", ep_count)
@@ -1429,8 +1463,10 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         fps = int (1.0/time_step),
                     )
                     del stats_episodes[current_episode.episode_id]["top_down_map"]
+                    del stats_episodes[current_episode.episode_id]["collisions"]
                     rgb_frames =[]
                 # del stats_episodes[current_episode.episode_id]["top_down_map"]
+                # del stats_episodes[current_episode.episode_id]["collisions"]
                 if config.PLOT_ATTENTION:
                     for j in range(len(attention_weights[i])):
                         attention_weights[i][j] = attention_weights[i][j][:,:min_2nd_dim]

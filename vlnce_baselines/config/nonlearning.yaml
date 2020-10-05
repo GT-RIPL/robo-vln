@@ -1,8 +1,8 @@
-BASE_TASK_CONFIG_PATH: habitat_extensions/config/vlnce_task.yaml
+BASE_TASK_CONFIG_PATH: habitat_extensions/config/robo_vlnce_task.yaml
 EVAL:
-    SPLIT: val_unseen
+    SPLIT: val_seen
     # any num greater than the actual episode count evals every episode
-    EPISODE_COUNT: 10
+    EPISODE_COUNT: 576
     EVAL_NONLEARNING: True
     NONLEARNING:
         # RandomAgent or HandcraftedAgent

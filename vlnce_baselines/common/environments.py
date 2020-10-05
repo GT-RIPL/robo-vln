@@ -38,8 +38,7 @@ class VLNCEDaggerEnv(habitat.RLEnv):
         return (self._env.episode_over, episode_success)
 
     def get_info(self, observations):
-        # return self.habitat_env.get_metrics()
-        return 0.0
+        return self.habitat_env.get_metrics()
 
     def get_object2idx(self):
         return self._env.task.sensor_suite.get('ego_sem_map').map_sensor.object2idx

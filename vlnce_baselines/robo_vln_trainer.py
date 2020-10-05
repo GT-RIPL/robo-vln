@@ -17,6 +17,8 @@ import magnum as mn
 import time
 import quaternion
 from habitat_sim.utils.common import quat_to_magnum, quat_from_magnum
+from fastdtw import fastdtw
+import gzip 
 
 import lmdb
 import msgpack_numpy
@@ -56,10 +58,11 @@ from vlnce_baselines.models.seq2seq_sem_text_attn import Seq2Seq_Sem_Text_Attn
 from vlnce_baselines.models.hybrid_cma_mp import TransformerHybridPolicy
 from vlnce_baselines.models.seq2seq import Seq2SeqNet
 
-#WandB – Login to your wandb account so you can log all your metrics
+#WandB – Login to your wand
+# b account so you can log all your metrics
 wandb.login()
 
-wandb.init(project="Robo_VLN_Base_Seq2Seq_w_glove_1")
+wandb.init(project="RVLN_Base_Seq2Seq_bert")
 
 wb_config = wandb.config
 wb_config.LR = 1e-4
@@ -931,7 +934,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 collate_fn=collate_fn,
                 pin_memory=False,
                 drop_last=True,  # drop last batch if smaller
-                num_workers=3,
+                num_workers=1,
             )
 
             dataset_eval = IWTrajectoryDataset(
@@ -949,7 +952,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 collate_fn=collate_fn,
                 pin_memory=False,
                 drop_last=True,  # drop last batch if smaller
-                num_workers=3,
+                num_workers=1,
             )
 
             AuxLosses.activate()
@@ -988,6 +991,9 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
         return (envs, recurrent_hidden_states, not_done_masks, prev_actions, batch)
 
+    def _euclidean_distance(self, position_a, position_b):
+        return np.linalg.norm(np.array(position_b) - np.array(position_a), ord=2)
+
     def _eval_checkpoint(
         self, checkpoint_path: str, writer: TensorboardWriter, checkpoint_index: int = 0
     ) -> None:
@@ -1023,8 +1029,12 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
         config.freeze()
 
+        gt_path = config.TASK_CONFIG.TASK.NDTW.GT_PATH.format(split=config.TASK_CONFIG.DATASET.SPLIT)
+        with gzip.open(gt_path, "rt") as f:
+            self.gt_json = json.load(f)
+
         # setup agent
-        self.envs =  construct_env(self.config)
+        self.envs =  construct_env(config)
         self.device = (
             torch.device("cuda", config.TORCH_GPU_ID)
             if torch.cuda.is_available()
@@ -1079,20 +1089,20 @@ class RoboDaggerTrainer(BaseRLTrainer):
         ep_count = 0
         min_2nd_dim = 1000
         steps=0
-        start_time = time.time()
+        locations=[]
         while (
             len(stats_episodes) < config.EVAL.EPISODE_COUNT
         ):
-            
             current_episode = self.envs.habitat_env.current_episode
             # print("Number of episodes:", self.envs.number_of_episodes)
             # print("Number of envs:", self.envs.num_envs)
             # # print("Count episodes:", self.envs.count_episodes)
             # print("--------------------------------------------")
             is_done = False
+            locations.append(self.envs.habitat_env._sim.get_agent_state().position.tolist())
             with torch.no_grad():
                 batch = (observations, eval_recurrent_hidden_states, prev_actions, not_done_masks)
-                output, eval_recurrent_hidden_states = self.actor_critic(batch)
+                output, stop_out, eval_recurrent_hidden_states = self.actor_critic(batch)
                 # (_, actions, _, eval_recurrent_hidden_states) = self.actor_critic.act(
                 #     batch,
                 #     eval_recurrent_hidden_states,
@@ -1102,6 +1112,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 # )
                 prev_actions = output
 
+            lin_vel = output[:, 0]
+
             not_done_masks = torch.ones(config.NUM_PROCESSES, 2, device=self.device)
 
             # print("Loop:", k, "hidden states shape:", eval_recurrent_hidden_states.shape)
@@ -1109,12 +1121,17 @@ class RoboDaggerTrainer(BaseRLTrainer):
             # print("output",output)
             # print("output.shape",output.shape)
             # print("v", output[:,0])
+
+            
             vc.linear_velocity = mn.Vector3(0, 0, output[:,0].cpu().numpy())
             max_turn_speed = 1.0
             vc.angular_velocity = mn.Vector3(0, np.clip(output[:,1].cpu().numpy(), -max_turn_speed, max_turn_speed), 0)
             observations, _, done, info = self.envs.step(vc) 
             episode_over, success = done
-            is_done = episode_over or success 
+
+            stop_pred = torch.round(torch.sigmoid(stop_out))
+            episode_success = success and (lin_vel<0.25 or stop_pred ==1)
+            is_done = episode_over or episode_success 
             steps+=1
 
             if len(config.VIDEO_OPTION) > 0:
@@ -1152,13 +1169,20 @@ class RoboDaggerTrainer(BaseRLTrainer):
             #         rgb_frames[i].append(frame)
 
             if is_done or steps==self.config.TASK_CONFIG.ENVIRONMENT.MAX_EPISODE_STEPS:
+                # calulcate NDTW here 
+                gt_locations = self.gt_json[str(current_episode.episode_id)]["locations"]
+                dtw_distance = fastdtw(locations, gt_locations, dist=self._euclidean_distance)[0]
+                nDTW = np.exp(-dtw_distance / (len(gt_locations) * config.TASK_CONFIG.TASK.NDTW.SUCCESS_DISTANCE))
+                # print("dtw time",time.time()-dtw_time)
+                locations=[]
                 is_done = False
-                print("Episode complete in steps:", steps)
-                print("single while loop time", time.time()-start_time)
+                # print("Episode complete in steps:", steps)
+                # print("One Step Time", time.time()-start_time)
                 ep_count+=1
                 steps=0
                 print("dones:", done)
                 stats_episodes[current_episode.episode_id] = info
+                stats_episodes[current_episode.episode_id]['ndtw'] = nDTW
                 
                 print("Current episode ID:", current_episode.episode_id)
                 print("Episode Completed:", ep_count)
@@ -1181,7 +1205,6 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 metrics={"SPL":round(
                             stats_episodes[current_episode.episode_id]["spl"], 6
                         ) } 
-                start_time = time.time() 
                 if len(config.VIDEO_OPTION) > 0:
                     time_step=30
                     generate_video(
@@ -1196,7 +1219,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     )
                     del stats_episodes[current_episode.episode_id]["top_down_map"]
                     rgb_frames =[]
-                del stats_episodes[current_episode.episode_id]["top_down_map"]
+                # del stats_episodes[current_episode.episode_id]["top_down_map"]
                 if config.PLOT_ATTENTION:
                     for j in range(len(attention_weights[i])):
                         attention_weights[i][j] = attention_weights[i][j][:,:min_2nd_dim]
@@ -1211,7 +1234,6 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         )
                     attention_weights[i] = [] 
                     save_actions[i] =[]
-     
             observations = transform_obs(
                 observations, config.TASK_CONFIG.TASK.INSTRUCTION_SENSOR_UUID, is_bert=self.config.MODEL.INSTRUCTION_ENCODER.is_bert
             )
