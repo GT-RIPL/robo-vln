@@ -103,12 +103,13 @@ class Seq2SeqNet(nn.Module):
         self.progress_monitor = nn.Linear(
             self.model_config.STATE_ENCODER.hidden_size, 1
         )
+        self.linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, num_actions)
+        self.stop_linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, 1)
 
         self._init_layers()
 
         self.train()
-        self.linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, num_actions)
-        self.stop_linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, 1)
+
 
     def pad_instructions(self, observations):
         instructions =[]

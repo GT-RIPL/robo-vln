@@ -18,22 +18,7 @@ from vlnce_baselines.models.encoders.resnet_encoders import (
 )
 from vlnce_baselines.models.policy import BasePolicy
 
-
-class CMAPolicy(BasePolicy):
-    def __init__(
-        self, observation_space: Space, action_space: Space, model_config: Config
-    ):
-        super().__init__(
-            CMANet(
-                observation_space=observation_space,
-                model_config=model_config,
-                num_actions=action_space.n,
-            ),
-            action_space.n,
-        )
-
-
-class CMANet(Net):
+class CMANet(nn.Module):
     r""" A cross-modal attention (CMA) network that contains:
         Instruction encoder
         Depth encoder
@@ -41,7 +26,7 @@ class CMANet(Net):
         RNN state encoder or CMA state encoder
     """
 
-    def __init__(self, observation_space: Space, model_config: Config, num_actions):
+    def __init__(self, observation_space: Space, num_actions: int, model_config: Config):
         super().__init__()
         self.model_config = model_config
         model_config.defrost()
@@ -76,11 +61,13 @@ class CMANet(Net):
         self.rgb_encoder = TorchVisionResNet50(
             observation_space,
             model_config.RGB_ENCODER.output_size,
+            model_config.RGB_ENCODER.resnet_output_size, 
             device,
             spatial_output=True,
         )
 
-        self.prev_action_embedding = nn.Embedding(num_actions + 1, 32)
+        if model_config.CMA.use_prev_action:
+            self.prev_action_embedding = nn.Embedding(num_actions + 1, 32)
 
         self.rcm_state_encoder = model_config.CMA.rcm_state_encoder
 
@@ -116,7 +103,8 @@ class CMANet(Net):
             # Init the RNN state decoder
             rnn_input_size = model_config.DEPTH_ENCODER.output_size
             rnn_input_size += model_config.RGB_ENCODER.output_size
-            rnn_input_size += self.prev_action_embedding.embedding_dim
+            if model_config.CMA.use_prev_action:
+                rnn_input_size += self.prev_action_embedding.embedding_dim
 
             self.state_encoder = RNNStateEncoder(
                 input_size=rnn_input_size,
@@ -144,6 +132,12 @@ class CMANet(Net):
             1,
         )
 
+        # self.depth_kv = nn.Conv1d(
+        #     self.depth_encoder.output_shape[0],
+        #     hidden_size,
+        #     1,
+        # )
+
         self.state_q = nn.Linear(hidden_size, hidden_size // 2)
         self.text_k = nn.Conv1d(
             self.instruction_encoder.output_size, hidden_size // 2, 1
@@ -152,13 +146,22 @@ class CMANet(Net):
 
         self.register_buffer("_scale", torch.tensor(1.0 / ((hidden_size // 2) ** 0.5)))
 
-        self.second_state_compress = nn.Sequential(
-            nn.Linear(
-                self._output_size + self.prev_action_embedding.embedding_dim,
-                self._hidden_size,
-            ),
-            nn.ReLU(True),
-        )
+        if model_config.CMA.use_prev_action:
+            self.second_state_compress = nn.Sequential(
+                nn.Linear(
+                    self._output_size + self.prev_action_embedding.embedding_dim,
+                    self._hidden_size,
+                ),
+                nn.ReLU(True),
+            )
+        else:
+            self.second_state_compress = nn.Sequential(
+                nn.Linear(
+                    self._output_size,
+                    self._hidden_size,
+                ),
+                nn.ReLU(True),
+            )
 
         self.second_state_encoder = RNNStateEncoder(
             input_size=self._hidden_size,
@@ -169,6 +172,9 @@ class CMANet(Net):
         self._output_size = model_config.STATE_ENCODER.hidden_size
 
         self.progress_monitor = nn.Linear(self.output_size, 1)
+
+        self.linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, num_actions)
+        self.stop_linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, 1)
 
         self._init_layers()
 
@@ -203,22 +209,30 @@ class CMANet(Net):
 
         return torch.einsum("ni, nci -> nc", attn, v)
 
-    def forward(self, observations, rnn_hidden_states, prev_actions, masks):
+    def forward(self, batch):
         r"""
         instruction_embedding: [batch_size x INSTRUCTION_ENCODER.output_size]
         depth_embedding: [batch_size x DEPTH_ENCODER.output_size]
         rgb_embedding: [batch_size x RGB_ENCODER.output_size]
         """
-        instruction_embedding = self.instruction_encoder(observations)
+
+        observations, rnn_hidden_states, prev_actions, masks = batch
+        del batch
+        masks = masks[:,0]
         depth_embedding = self.depth_encoder(observations)
         depth_embedding = torch.flatten(depth_embedding, 2)
 
         rgb_embedding = self.rgb_encoder(observations)
         rgb_embedding = torch.flatten(rgb_embedding, 2)
 
-        prev_actions = self.prev_action_embedding(
-            ((prev_actions.float() + 1) * masks).long().view(-1)
-        )
+        instruction = observations['instruction'].long().expand(rgb_embedding.shape[0], observations['instruction'].shape[1])
+        instruction_embedding = self.instruction_encoder(instruction)
+        del observations['instruction']
+
+        if self.model_config.CMA.use_prev_action:
+            prev_actions = self.prev_action_embedding(
+                ((prev_actions.float() + 1) * masks).long().view(-1)
+            )
 
         if self.model_config.ablate_instruction:
             instruction_embedding = instruction_embedding * 0
@@ -242,7 +256,10 @@ class CMANet(Net):
             rgb_in = self.rgb_linear(rgb_embedding)
             depth_in = self.depth_linear(depth_embedding)
 
-            state_in = torch.cat([rgb_in, depth_in, prev_actions], dim=1)
+            if self.model_config.CMA.use_prev_action:
+                state_in = torch.cat([rgb_in, depth_in, prev_actions], dim=1)
+            else:
+                state_in = torch.cat([rgb_in, depth_in], dim=1)
             (
                 state,
                 rnn_hidden_states[0 : self.state_encoder.num_recurrent_layers],
@@ -259,6 +276,8 @@ class CMANet(Net):
             text_state_q, text_state_k, instruction_embedding, text_mask
         )
 
+        # print("rgb_embedding", self.rgb_kv(rgb_embedding).shape)
+        # print("depth_embedding", self.depth_kv(depth_embedding).shape)
         rgb_k, rgb_v = torch.split(
             self.rgb_kv(rgb_embedding), self._hidden_size // 2, dim=1
         )
@@ -269,10 +288,28 @@ class CMANet(Net):
         text_q = self.text_q(text_embedding)
         rgb_embedding = self._attn(text_q, rgb_k, rgb_v)
         depth_embedding = self._attn(text_q, depth_k, depth_v)
+        
 
-        x = torch.cat(
-            [state, text_embedding, rgb_embedding, depth_embedding, prev_actions], dim=1
-        )
+        # print("rgb embedding", rgb_embedding.shape)
+        # print("depth embedding", depth_embedding.shape)
+        # print("text embedding", text_embedding.shape)
+        # print("state ", state.shape)
+
+
+        # print(
+        # elf.model_config.RGB_ENCODER.output_size)
+        # print(self.model_config.DEPTH_ENCODER.output_size)
+        # print(self.instruction_encoder.output_size)
+        # print(self.model_config.STATE_ENCODER.hidden_size)
+
+        if self.model_config.CMA.use_prev_action:
+            x = torch.cat(
+                [state, text_embedding, rgb_embedding, depth_embedding, prev_actions], dim=1
+            )
+        else:
+            x = torch.cat(
+                [state, text_embedding, rgb_embedding, depth_embedding], dim=1
+            )
         x = self.second_state_compress(x)
         (
             x,
@@ -292,7 +329,9 @@ class CMANet(Net):
                 self.model_config.PROGRESS_MONITOR.alpha,
             )
 
-        return x, rnn_hidden_states
+        output = self.linear(x)
+        stop_out = self.stop_linear(x)
+        return output, stop_out, rnn_hidden_states
 
 
 if __name__ == "__main__":

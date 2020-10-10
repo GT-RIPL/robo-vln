@@ -29,6 +29,8 @@ def evaluate_agent(config: Config):
     config.TASK_CONFIG.DATASET.SPLIT = split
     config.TASK_CONFIG.TASK.NDTW.SPLIT = split
     config.TASK_CONFIG.TASK.SDTW.SPLIT = split
+    config.TASK_CONFIG.ENVIRONMENT.ITERATOR_OPTIONS.SHUFFLE = True
+    config.TASK_CONFIG.ENVIRONMENT.ITERATOR_OPTIONS.MAX_SCENE_REPEAT_STEPS = -1
     config.freeze()
     logger.info(config)
 
@@ -71,6 +73,7 @@ def evaluate_agent(config: Config):
         episode_success = success and (actions[0]<0.25)
         is_done = episode_over or episode_success 
         steps+=1
+        locations.append(env.habitat_env._sim.get_agent_state().position.tolist())
 
         if is_done or steps==config.TASK_CONFIG.ENVIRONMENT.MAX_EPISODE_STEPS:
             gt_locations = gt_json[str(current_episode.episode_id)]["locations"]
@@ -84,12 +87,15 @@ def evaluate_agent(config: Config):
             print("dones:", done)
             stats_episodes[current_episode.episode_id] = info
             stats_episodes[current_episode.episode_id]['ndtw'] = nDTW
+            print("len stats episodes",len(stats_episodes))
             
             print("Current episode ID:", current_episode.episode_id)
             print("Episode Completed:", ep_count)
             print(" Episode done---------------------------------------------")
             obs = env.reset()
             print(stats_episodes[current_episode.episode_id])
+
+    env.close()
 
     aggregated_stats = {}
     num_episodes = len(stats_episodes)
@@ -101,7 +107,7 @@ def evaluate_agent(config: Config):
         aggregated_stats[stat_key] = (
             sum([v[stat_key] for v in stats_episodes.values()]) / num_episodes
         )
-    with open(f"stats_{config.EVAL.NONLEARNING.AGENT}_{split}.json", "w") as f:
+    with open(f"stats_complete_{config.EVAL.NONLEARNING.AGENT}_{split}.json", "w") as f:
         json.dump(aggregated_stats, f, indent=4)
 
 

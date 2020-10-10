@@ -50,7 +50,7 @@ from vlnce_baselines.common.env_utils import (
     SimpleRLEnv
 )
 from vlnce_baselines.common.utils import transform_obs, batch_obs, batch_obs_data_collect, repackage_hidden, split_batch_tbptt, repackage_mini_batch
-from vlnce_baselines.models.cma_policy import CMAPolicy
+from vlnce_baselines.models.cma_policy import CMANet
 from vlnce_baselines.models.seq2seq_sem_attn import Seq2Seq_Sem_Attn_Policy
 from vlnce_baselines.models.seq2seq_policy import Seq2SeqPolicy
 from vlnce_baselines.models.seq2seq_text_attn import Seq2Seq_Lang_Attn
@@ -62,16 +62,18 @@ from vlnce_baselines.models.seq2seq import Seq2SeqNet
 # b account so you can log all your metrics
 wandb.login()
 
-wandb.init(project="RVLN_Base_Seq2Seq_bert")
+wandb.init(project="RVLN_CMA", dir='wandb/RVLN_CMA')
+# If you don't want your script to sync to the cloud
+# os.environ['WANDB_MODE'] = 'dryrun'
 
 wb_config = wandb.config
 wb_config.LR = 1e-4
 wb_config.EPOCHS = 20
 wb_config.BATCH_SIZE = 1
 
-with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", category=FutureWarning)
-    import tensorflow as tf
+# with warnings.catch_warnings():
+#     warnings.filterwarnings("ignore", category=FutureWarning)
+#     import tensorflow as tf
 
 # from pynvml import *
 # nvmlInit()
@@ -345,9 +347,9 @@ class RoboDaggerTrainer(BaseRLTrainer):
         config.freeze()
 
         if config.CMA.use:
-            self.actor_critic = CMAPolicy(
+            self.actor_critic = CMANet(
                 observation_space=self.envs.observation_space,
-                action_space=self.envs.action_space,
+                num_actions=2,
                 model_config=config,
             )
         elif config.SEM_ATTN_ENCODER.use:
@@ -614,9 +616,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
         loss = (action_loss.item(), stop_loss.item(), aux_loss_data)
         return loss, recurrent_hidden_states
 
-    def train_epoch(self, diter, length, batch_size, epoch):
+    def train_epoch(self, diter, length, batch_size, epoch, train_steps):
         loss, action_loss, aux_loss = 0, 0, 0
-        step_id = 0
         action_losses=[]
         stop_losses =[]
         total_losses=[]
@@ -632,8 +633,15 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 oracle_stop_batch
             ) = batch
 
+            # recurrent_hidden_states = torch.zeros(
+            #     self.actor_critic.state_encoder.num_recurrent_layers,
+            #     self.config.DAGGER.BATCH_SIZE,
+            #     self.config.MODEL.STATE_ENCODER.hidden_size,
+            #     device=self.device,
+            # )
+
             recurrent_hidden_states = torch.zeros(
-                self.actor_critic.state_encoder.num_recurrent_layers,
+                self.actor_critic.num_recurrent_layers,
                 self.config.DAGGER.BATCH_SIZE,
                 self.config.MODEL.STATE_ENCODER.hidden_size,
                 device=self.device,
@@ -733,13 +741,13 @@ class RoboDaggerTrainer(BaseRLTrainer):
             logger.info(f"Train_combined_loss: {np.mean(total_losses)}")
             # logger.info(f"train_action_loss: {action_loss}")
             logger.info(f"train_aux_loss: {aux_loss}")
-            logger.info(f"Batches processed: {step_id}.")
+            logger.info(f"Batches processed: {train_steps}.")
             logger.info(f"Epoch {epoch}.")
             wandb.log({
             "Train Action Loss": np.mean(action_losses),
             "Train Stop Loss": np.mean(stop_losses),
             "Train Total Loss": np.mean(total_losses),
-            "Test Aux Loss": aux_loss})
+            "Test Aux Loss": aux_loss}, step = train_steps)
 
             # writer.add_scalar(f"train_loss_iter_{dagger_it}", losses.mean(), step_id)
             # writer.add_scalar(
@@ -748,14 +756,15 @@ class RoboDaggerTrainer(BaseRLTrainer):
             # writer.add_scalar(
             #     f"Cache_0_mem_usage_{dagger_it}", torch.cuda.memory_cached(0), step_id
             # )
-            step_id += 1
+            train_steps += 1
 
         self.save_checkpoint(
             f"ckpt.{self.config.DAGGER.EPOCHS + epoch}.pth"
         )
+        return train_steps
 
 
-    def val_epoch(self, diter, length, batch_size, epoch):
+    def val_epoch(self, diter, length, batch_size, epoch, val_steps):
         loss, action_loss, aux_loss = 0, 0, 0
         step_id = 0
         losses_time=[]
@@ -774,7 +783,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 ) = batch
 
                 recurrent_hidden_states = torch.zeros(
-                    self.actor_critic.state_encoder.num_recurrent_layers,
+                    self.actor_critic.num_recurrent_layers,
                     self.config.DAGGER.BATCH_SIZE,
                     self.config.MODEL.STATE_ENCODER.hidden_size,
                     device=self.device,
@@ -816,22 +825,23 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
                 logger.info(f"val_loss: {np.mean(losses_time)}")
                 logger.info(f"Val_aux_loss: {aux_loss}")
-                logger.info(f"Batches processed: {step_id}.")
+                logger.info(f"Batches processed: {val_steps}.")
                 logger.info(f"Epoch {epoch}.")
                 wandb.log({
                 "Val Loss iter": np.mean(losses_time),
-                "Val Aux Loss iter": aux_loss})
+                "Val Aux Loss iter": aux_loss}, step=val_steps)
                 
                 # writer.add_scalar(f"Val_losses_time_iter_{dagger_it}", losses_time.mean(), step_id)
                 # writer.add_scalar(
                 #     f"val_aux_loss_iter_{dagger_it}", aux_loss, step_id
                 # )
-                step_id += 1
+                val_steps += 1
                 # end = time.time()
                 val_losses.append(np.mean(losses_time))
             # writer.add_scalar(f"Val_losses_iter_{dagger_it}", val_losses.mean(), epoch)
             wandb.log({
             "Val Loss epoch": np.mean(val_losses)})
+            return val_steps
 
             
 
@@ -954,12 +964,14 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 drop_last=True,  # drop last batch if smaller
                 num_workers=1,
             )
+            train_steps =0
+            val_steps =0
 
             AuxLosses.activate()
             print("starting training loop")
             for epoch in tqdm.trange(self.config.DAGGER.EPOCHS):
-                self.train_epoch(diter, dataset.length, dataset.batch_size, epoch)
-                self.val_epoch(diter_eval, dataset_eval.length, dataset_eval.batch_size, epoch)
+                train_steps = self.train_epoch(diter, dataset.length, dataset.batch_size, epoch, train_steps)
+                val_steps = self.val_epoch(diter_eval, dataset_eval.length, dataset_eval.batch_size, epoch, val_steps)
             AuxLosses.deactivate()
 
     @staticmethod
@@ -1190,6 +1202,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
                 print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
                 print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+                print("stats_episode", len(stats_episodes))
                 observations = self.envs.reset()
                 prev_actions = torch.zeros(
                     config.NUM_PROCESSES, 2, device=self.device, dtype=torch.long
