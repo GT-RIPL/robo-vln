@@ -92,6 +92,4 @@ class InstructionEncoder(nn.Module):
         if self.final_state_only:
             return final_state[0].squeeze(0)
         else:
-            return nn.utils.rnn.pad_packed_sequence(output, batch_first=True)[
-                0
-            ].permute(0, 2, 1), final_state
+            return nn.utils.rnn.pad_packed_sequence(output, batch_first=True)[0].permute(0, 2, 1)

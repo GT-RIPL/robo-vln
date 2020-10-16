@@ -80,7 +80,7 @@ class PositionWiseFeedForward(nn.Module):
 
     def forward(self, input):
         # HERE BERT Style F.gelu is used
-        pwff = self.fc2(self.dropout_2(F.gelu(self.fc1(input))))
+        pwff = self.fc2(self.dropout_2(F.relu(self.fc1(input))))
         pwff = self.dropout(pwff)
         out = self.layer_norm(input + pwff)
         return out
@@ -246,6 +246,46 @@ class DecoderLayer(nn.Module):
         enc_att = self.enc_att(self_att, enc_output, enc_output, mask_enc_att)
         ff = self.pwff(enc_att)
         return ff
+
+class InterModuleAttnLayer(nn.Module):
+    def __init__(self, d_model=512, d_k=64, d_v=64, h=8, d_ff=2048, dropout=.1, pooler=False):
+        super(InterModuleAttnLayer, self).__init__()
+        self.enc_att = MultiHeadAttention(d_model, d_k, d_v, h, dropout)
+        self.pwff = PositionWiseFeedForward(d_model, d_ff, dropout)
+
+    def with_pos_embed(self, tensor, pos: Optional[Tensor]):
+        return tensor if pos is None else tensor + pos
+
+    def forward(self, input_1, input_2, mask_self_att, mask_enc_att, pos_embed=None):
+        enc_att = self.enc_att(input_1, input_2, input_2, mask_enc_att)
+        ff = self.pwff(enc_att)
+        return ff
+
+class InterModuleAttnDecoder(nn.Module):
+    def __init__(self, config):
+        super(InterModuleAttnDecoder, self).__init__()
+        self.d_model = config.d_model
+        self.d_att = int(self.d_model/config.h)
+        self.layers = nn.ModuleList([InterModuleAttnLayer(self.d_model, self.d_att, self.d_att, config.h, config.d_ff, config.dropout) for _ in range(config.N)])
+        self.fc = nn.Linear(config.in_features, self.d_model)
+        self.dropout = nn.Dropout(p=config.dropout)
+        self.layer_norm = nn.LayerNorm(self.d_model)
+
+    def forward(self, input, input_2, self_att_mask, enc_att_mask):
+        out = F.relu(self.fc(input))
+        out = self.dropout(out)
+        out = self.layer_norm(out)
+
+        input_2 = F.relu(self.fc(input_2))
+        input_2 = self.dropout(input_2)
+        input_2 = self.layer_norm(input_2)
+
+        ##TODO: Try making Image encoder same as DETR Image encoder: https://github.com/facebookresearch/detr/blob/ae03a2d6e52a9ec1b67f85437d0a275c5abbe9ac/models/transformer.py#L149
+        ## Add position embed to only query and key vector and not value
+
+        for l in self.layers:
+            out = l(out, input_2, self_att_mask, enc_att_mask)
+        return out
 
 
 class ImageCrossModalEncoder(nn.Module):

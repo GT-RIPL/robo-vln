@@ -58,18 +58,18 @@ from vlnce_baselines.models.seq2seq_sem_text_attn import Seq2Seq_Sem_Text_Attn
 from vlnce_baselines.models.hybrid_cma_mp import TransformerHybridPolicy
 from vlnce_baselines.models.seq2seq import Seq2SeqNet
 
-#WandB – Login to your wand
-# b account so you can log all your metrics
-wandb.login()
+# #WandB – Login to your wand
+# # b account so you can log all your metrics
+# wandb.login()
 
-wandb.init(project="RVLN_CMA", dir='wandb/RVLN_CMA')
-# If you don't want your script to sync to the cloud
-# os.environ['WANDB_MODE'] = 'dryrun'
+# wandb.init(project="RVLN_CMA", dir='wandb/RVLN_CMA')
+# # If you don't want your script to sync to the cloud
+# # os.environ['WANDB_MODE'] = 'dryrun'
 
-wb_config = wandb.config
-wb_config.LR = 1e-4
-wb_config.EPOCHS = 20
-wb_config.BATCH_SIZE = 1
+# wb_config = wandb.config
+# wb_config.LR = 1e-4
+# wb_config.EPOCHS = 20
+# wb_config.BATCH_SIZE = 1
 
 # with warnings.catch_warnings():
 #     warnings.filterwarnings("ignore", category=FutureWarning)
@@ -766,7 +766,6 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
     def val_epoch(self, diter, length, batch_size, epoch, val_steps):
         loss, action_loss, aux_loss = 0, 0, 0
-        step_id = 0
         losses_time=[]
         val_losses =[]
         self.actor_critic.eval()
@@ -1075,7 +1074,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         # del batch['instruction']
 
         eval_recurrent_hidden_states = torch.zeros(
-            self.actor_critic.state_encoder.num_recurrent_layers,
+            self.actor_critic.num_recurrent_layers,
             self.config.NUM_PROCESSES,
             self.config.MODEL.STATE_ENCODER.hidden_size,
             device=self.device,
@@ -1210,7 +1209,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 not_done_masks = torch.zeros(config.NUM_PROCESSES, 2, device=self.device)
 
                 eval_recurrent_hidden_states = torch.zeros(
-                    self.actor_critic.state_encoder.num_recurrent_layers,
+                    self.actor_critic.num_recurrent_layers,
                     self.config.NUM_PROCESSES,
                     self.config.MODEL.STATE_ENCODER.hidden_size,
                     device=self.device,

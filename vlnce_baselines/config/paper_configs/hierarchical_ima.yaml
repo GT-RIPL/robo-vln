@@ -4,9 +4,9 @@ TORCH_GPU_ID: 0
 NUM_PROCESSES: 1
 TRAINER_NAME : "hierarchical_trainer"
 
-TENSORBOARD_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/hierarchical_s2s
-CHECKPOINT_FOLDER: /srv/share/mirshad7/data/robo-vln/checkpoints/hierarchical_s2s
-EVAL_CKPT_PATH_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/hierarchical_s2s/ckpt.49.pth
+TENSORBOARD_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/hierarchical_ima
+CHECKPOINT_FOLDER: /srv/share/mirshad7/data/robo-vln/checkpoints/hierarchical_ima
+EVAL_CKPT_PATH_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/hierarchical_ima
 
 VIDEO_DIR: "data/robo-vln/tensorboard_dirs/hierarchical_s2s/run_2/videos"
 PLOT_ATTENTION: False
@@ -25,6 +25,7 @@ DAGGER:
   BATCH_SIZE: 1
   P: 1.0
   PRELOAD_LMDB_FEATURES: True
+  INTER_MODULE_ATTN: True
   LMDB_FEATURES_DIR: /srv/share2/mirshad7/data/robo-vln/trajectory_dir/robo_complete/train/trajectories.lmdb
   LMDB_EVAL_DIR: /srv/share2/mirshad7/data/robo-vln/trajectory_dir/robo_complete/val_seen/trajectories.lmdb
 

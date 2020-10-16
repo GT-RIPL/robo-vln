@@ -67,6 +67,7 @@ _C.DAGGER.LMDB_EVAL_SIZE = 1e11
 _C.DAGGER.tbptt_steps = 100
 _C.DAGGER.split_dim = 0
 _C.DAGGER.COLLECT_DATA_SPLIT = 'train'
+_C.DAGGER.INTER_MODULE_ATTN = False
 
 # How often to commit the writes to the DB, less commits is
 # better, but everything must be in memory until a commit happens/
@@ -105,7 +106,7 @@ _C.MODEL.INSTRUCTION_ENCODER.dataset_vocab = (
     "data/datasets/R2R_VLNCE_v1_preprocessed/train/train.json.gz"
 )
 _C.MODEL.INSTRUCTION_ENCODER.fine_tune_embeddings = False
-_C.MODEL.INSTRUCTION_ENCODER.embedding_size = 768
+_C.MODEL.INSTRUCTION_ENCODER.embedding_size = 50
 _C.MODEL.INSTRUCTION_ENCODER.hidden_size = 256
 _C.MODEL.INSTRUCTION_ENCODER.rnn_type = "LSTM"
 _C.MODEL.INSTRUCTION_ENCODER.final_state_only = True
@@ -141,6 +142,15 @@ _C.MODEL.ACTION_DECODER_TRANFORMER.h = 4
 _C.MODEL.ACTION_DECODER_TRANFORMER.d_ff = 1024
 _C.MODEL.ACTION_DECODER_TRANFORMER.dropout = 0.1
 
+_C.MODEL.INTER_MODULE_ATTN = CN()
+_C.MODEL.INTER_MODULE_ATTN.N = 1
+_C.MODEL.INTER_MODULE_ATTN.in_features = 512
+_C.MODEL.INTER_MODULE_ATTN.fc_output = 512
+_C.MODEL.INTER_MODULE_ATTN.d_model = 512
+_C.MODEL.INTER_MODULE_ATTN.h = 4
+_C.MODEL.INTER_MODULE_ATTN.d_ff = 1024
+_C.MODEL.INTER_MODULE_ATTN.dropout = 0.1
+
 
 _C.MODEL.SEM_MAP_TRANSFORMER = CN()
 _C.MODEL.SEM_MAP_TRANSFORMER.embedding_dim = 128
@@ -158,7 +168,8 @@ _C.MODEL.SEM_MAP_TRANSFORMER.n_output = 512
 _C.MODEL.RGB_ENCODER = CN()
 # 'SimpleRGBCNN' or 'TorchVisionResNet50'
 _C.MODEL.RGB_ENCODER.cnn_type = "TorchVisionResNet50"
-_C.MODEL.RGB_ENCODER.output_size = 512
+# _C.MODEL.RGB_ENCODER.output_size = 256 # for InterModule Attention
+_C.MODEL.RGB_ENCODER.output_size = 512 # for CMA + Seq2Seq
 _C.MODEL.RGB_ENCODER.resnet_output_size = 256
 
 _C.MODEL.DEPTH_ENCODER = CN()
@@ -171,7 +182,8 @@ _C.MODEL.DEPTH_ENCODER.backbone = "resnet50"
 _C.MODEL.DEPTH_ENCODER.ddppo_checkpoint = "data/ddppo-models/gibson-2plus-resnet50.pth"
 
 _C.MODEL.STATE_ENCODER = CN()
-_C.MODEL.STATE_ENCODER.hidden_size = 256
+# _C.MODEL.STATE_ENCODER.hidden_size = 512 # for Inter Module Attention
+_C.MODEL.STATE_ENCODER.hidden_size = 256 
 _C.MODEL.STATE_ENCODER.rnn_type = "LSTM"
 
 _C.MODEL.SEQ2SEQ = CN()
@@ -185,6 +197,7 @@ _C.MODEL.CMA.use = False
 # Use the state encoding model in RCM. If false,
 # will just concat inputs and run an RNN over them
 _C.MODEL.CMA.rcm_state_encoder = False
+_C.MODEL.CMA.use_prev_action = False
 
 _C.MODEL.PROGRESS_MONITOR = CN()
 _C.MODEL.PROGRESS_MONITOR.use = False

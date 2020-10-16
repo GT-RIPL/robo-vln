@@ -3,18 +3,14 @@ import gc
 import json
 import os
 import random
-import time
 import warnings
 from collections import defaultdict
 from typing import Dict
 import matplotlib.pyplot as plt
 import scipy.misc
-import time
 import habitat_sim
 import gc
-import time
 import magnum as mn 
-import time
 import quaternion
 from habitat_sim.utils.common import quat_to_magnum, quat_from_magnum
 import apex.amp as amp
@@ -53,6 +49,8 @@ from vlnce_baselines.common.env_utils import (
 from vlnce_baselines.common.utils import transform_obs, batch_obs, batch_obs_data_collect, repackage_hidden, split_batch_tbptt, repackage_mini_batch
 from vlnce_baselines.models.seq2seq_highlevel import Seq2Seq_HighLevel
 from vlnce_baselines.models.seq2seq_lowlevel import Seq2Seq_LowLevel
+from vlnce_baselines.models.hierarchical_policy import HierarchicalNet
+import time
 
 
 with warnings.catch_warnings():
@@ -62,15 +60,15 @@ with warnings.catch_warnings():
 # from pynvml import *
 # nvmlInit()
 
-#WandB – Login to your wandb account so you can log all your metrics
-wandb.login()
+# #WandB – Login to your wandb account so you can log all your metrics
+# wandb.login()
 
-wandb.init(project="hierarchical_test_on_Skynet_data", reinit=True)
+# wandb.init(project="hierarchical_ima", reinit=True)
 
-wb_config = wandb.config
-wb_config.LR = 1e-4
-wb_config.EPOCHS = 20
-wb_config.BATCH_SIZE = 1
+# wb_config = wandb.config
+# wb_config.LR = 1e-4
+# wb_config.EPOCHS = 20
+# wb_config.BATCH_SIZE = 1
 
 
 class ObservationsDict(dict):
@@ -314,6 +312,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         super().__init__(config)
         self.high_level = None
         self.low_level = None
+        self.actor_critic = None
         self.envs = None
 
         # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -347,31 +346,48 @@ class RoboDaggerTrainer(BaseRLTrainer):
         config.TORCH_GPU_ID = self.config.TORCH_GPU_ID
         config.freeze()
 
-        self.high_level = Seq2Seq_HighLevel(
+        if self.config.DAGGER.INTER_MODULE_ATTN:
+            self.actor_critic = HierarchicalNet(                
                 observation_space=self.envs.observation_space,
                 num_actions=self.envs.action_space.n,
+                num_sub_tasks = self.envs.action_space.n,
                 model_config=config,
-                batch_size = self.config.DAGGER.BATCH_SIZE,
+                batch_size = self.config.DAGGER.BATCH_SIZE)
+            
+            self.optimizer_high_level = torch.optim.Adam(
+                self.actor_critic.high_level.parameters(), lr=self.config.DAGGER.LR
+            )
+            self.optimizer_low_level = torch.optim.Adam(
+                self.actor_critic.low_level.parameters(), lr=self.config.DAGGER.LR
+            )
+        else:
+            self.high_level = Seq2Seq_HighLevel(
+                    observation_space=self.envs.observation_space,
+                    num_actions=self.envs.action_space.n,
+                    model_config=config,
+                    batch_size = self.config.DAGGER.BATCH_SIZE,
+                )
+
+            self.low_level = Seq2Seq_LowLevel(
+                    observation_space=self.envs.observation_space,
+                    num_actions=2,
+                    num_sub_tasks=self.envs.action_space.n,
+                    model_config=config,
+                    batch_size = self.config.DAGGER.BATCH_SIZE,
+                )
+
+            self.optimizer_high_level = torch.optim.Adam(
+                self.high_level.parameters(), lr=self.config.DAGGER.LR
+            )
+            self.optimizer_low_level = torch.optim.Adam(
+                self.low_level.parameters(), lr=self.config.DAGGER.LR
             )
 
-        self.low_level = Seq2Seq_LowLevel(
-                observation_space=self.envs.observation_space,
-                num_actions=2,
-                num_sub_tasks=self.envs.action_space.n,
-                model_config=config,
-                batch_size = self.config.DAGGER.BATCH_SIZE,
-            )
-
-        if not self.config.MODEL.TRANSFORMER.split_gpus:
-            self.high_level.to(self.device)
+            if not self.config.MODEL.TRANSFORMER.split_gpus:
+                self.high_level.to(self.device)
             # self.low_level.to(self.device2)    
 
-        self.optimizer_high_level = torch.optim.Adam(
-            self.high_level.parameters(), lr=self.config.DAGGER.LR
-        )
-        self.optimizer_low_level = torch.optim.Adam(
-            self.low_level.parameters(), lr=self.config.DAGGER.LR
-        )
+
 
         # self.optimizer = torch.optim.AdamW(self.actor_critic.parameters(), 
         #                             lr=self.config.MODEL.TRANSFORMER.lr, 
@@ -380,8 +396,11 @@ class RoboDaggerTrainer(BaseRLTrainer):
         # self.scheduler = torch.optim.lr_scheduler.CyclicLR(self.optimizer, base_lr=2e-6, max_lr=1e-4, step_size_up=1000,step_size_down=50000, cycle_momentum=False)
         if load_from_ckpt:
             ckpt_dict = self.load_checkpoint(ckpt_path, map_location="cpu")
-            self.high_level.load_state_dict(ckpt_dict["high_level_state_dict"])
-            self.low_level.load_state_dict(ckpt_dict["low_level_state_dict"])
+            if self.config.DAGGER.INTER_MODULE_ATTN:
+                self.actor_critic.load_state_dict(ckpt_dict["high_level_state_dict"])
+            else:
+                self.high_level.load_state_dict(ckpt_dict["high_level_state_dict"])
+                self.low_level.load_state_dict(ckpt_dict["low_level_state_dict"])
             logger.info(f"Loaded weights from checkpoint: {ckpt_path}")
         logger.info("Finished setting up actor critic model.")
 
@@ -394,12 +413,20 @@ class RoboDaggerTrainer(BaseRLTrainer):
         Returns:
             None
         """
-        checkpoint = {
-            "high_level_state_dict": self.high_level.state_dict(),
-            "low_level_state_dict": self.low_level.state_dict(),
-            "config": self.config,
-        }
-        torch.save(checkpoint, os.path.join(self.config.CHECKPOINT_FOLDER, file_name))
+        if self.config.DAGGER.INTER_MODULE_ATTN:
+            checkpoint = {
+                "state_dict": self.actor_critic.state_dict(),
+                "config": self.config,
+            }
+            torch.save(checkpoint, os.path.join(self.config.CHECKPOINT_FOLDER, file_name))
+
+        else:
+            checkpoint = {
+                "high_level_state_dict": self.high_level.state_dict(),
+                "low_level_state_dict": self.low_level.state_dict(),
+                "config": self.config,
+            }
+            torch.save(checkpoint, os.path.join(self.config.CHECKPOINT_FOLDER, file_name))
 
     def load_checkpoint(self, checkpoint_path, *args, **kwargs) -> Dict:
         r"""Load checkpoint of specified path as a dict.
@@ -536,161 +563,202 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
     def _update_agent(
         self, observations, prev_actions, not_done_masks, corrected_actions, oracle_stop, high_recurrent_hidden_states, 
-        low_recurrent_hidden_states
+        low_recurrent_hidden_states, detached_state_low
     ):
-        # T, N, C = corrected_actions.size()
         self.optimizer_high_level.zero_grad()
-        self.optimizer_low_level.zero_grad()
-
-        # self.high_level, self.optimizer_high_level = amp.initialize(self.high_level, self.optimizer_high_level, opt_level="O1")
-        
+        self.optimizer_low_level.zero_grad()  
         high_level_criterion = nn.CrossEntropyLoss(ignore_index=-1, reduction="mean")
         low_level_criterion = nn.MSELoss()
         low_level_stop_criterion = nn.BCEWithLogitsLoss()
-
         AuxLosses.clear()
-
         high_recurrent_hidden_states = repackage_hidden(high_recurrent_hidden_states)
         low_recurrent_hidden_states = repackage_hidden(low_recurrent_hidden_states)
 
-        batch = (observations, high_recurrent_hidden_states, prev_actions, not_done_masks)
-        output, high_recurrent_hidden_states = self.high_level(batch)
-        del batch
-        high_level_action_mask = observations['vln_oracle_action_sensor'] ==0
-        output = output.masked_fill_(high_level_action_mask, 0)
-        observations['vln_oracle_action_sensor'] = observations['vln_oracle_action_sensor'].squeeze(1).to(dtype=torch.int64)
-        # print("oracle action sensor",observations['vln_oracle_action_sensor'].shape)
-        # print("output shape",output.shape)
-        high_level_loss = high_level_criterion(output,(observations['vln_oracle_action_sensor']-1))
+        if self.config.DAGGER.INTER_MODULE_ATTN:
+            high_level_action_mask = observations['vln_oracle_action_sensor'] ==0
+            observations['vln_oracle_action_sensor'] = observations['vln_oracle_action_sensor'].to(dtype=torch.int64)
+            discrete_actions = observations['vln_oracle_action_sensor']
+            discrete_action_mask = discrete_actions ==0
+            discrete_actions = (discrete_actions-1).masked_fill_(discrete_action_mask, 4)
 
+            batch = (observations, high_recurrent_hidden_states, low_recurrent_hidden_states, 
+                    prev_actions, not_done_masks, discrete_actions.view(-1), detached_state_low)
+            
+            high_output, low_output, low_stop_output, high_recurrent_hidden_states, low_recurrent_hidden_states, detached_state_low = self.actor_critic(batch)
 
-        # with amp.scale_loss(high_level_loss, self.optimizer_high_level) as scaled_loss:
-        #     scaled_loss.backward()
+            del batch
+            high_output = high_output.masked_fill_(high_level_action_mask, 0)
+            high_level_loss = high_level_criterion(high_output,(observations['vln_oracle_action_sensor']-1).squeeze(1))
+            high_level_loss.backward()
+            high_level_loss_data = high_level_loss.detach()
+            del high_output
+            self.optimizer_high_level.step()
 
-        high_level_loss.backward()
-        self.optimizer_high_level.step()
-        high_level_loss_data = high_level_loss.detach()
-        # high_level_loss_data = scaled_loss.detach()
-        del output
+            oracle_stop = oracle_stop.to(self.device2)
+            corrected_actions = corrected_actions.to(self.device2)
 
-        self.low_level.to(self.device2)
-        # self.low_level, self.optimizer_low_level = amp.initialize(self.low_level, self.optimizer_low_level, opt_level="O1")
+            action_mask = corrected_actions==0
+            low_output = low_output.masked_fill_(action_mask, 0)
+            low_output = low_output.to(dtype=torch.float)
+            corrected_actions = corrected_actions.to(dtype=torch.float)
+            low_level_action_loss = low_level_criterion(low_output, corrected_actions)
 
+            mask = (oracle_stop!=-1)
+            oracle_stop = torch.masked_select(oracle_stop, mask)
+            low_stop_output = torch.masked_select(low_stop_output, mask)
+            low_level_stop_loss = low_level_stop_criterion(low_stop_output, oracle_stop)
+            low_level_loss = low_level_action_loss + low_level_stop_loss
+            low_level_loss.backward()
+            self.optimizer_low_level.step()
+        else:
+            batch = (observations, high_recurrent_hidden_states, prev_actions, not_done_masks)
+            output, high_recurrent_hidden_states = self.high_level(batch)
+            del batch
+            high_level_action_mask = observations['vln_oracle_action_sensor'] ==0
+            output = output.masked_fill_(high_level_action_mask, 0)
+            observations['vln_oracle_action_sensor'] = observations['vln_oracle_action_sensor'].squeeze(1).to(dtype=torch.int64)
+            high_level_loss = high_level_criterion(output,(observations['vln_oracle_action_sensor']-1))
+            high_level_loss.backward()
+            self.optimizer_high_level.step()
+            high_level_loss_data = high_level_loss.detach()
+            del output
 
-        observations = {
-            k: v.to(device=self.device2, non_blocking=True)
-            for k, v in observations.items()
-        }
-        discrete_actions = observations['vln_oracle_action_sensor']
-        discrete_action_mask = discrete_actions ==0
-        discrete_actions = (discrete_actions-1).masked_fill_(discrete_action_mask, 4)
+            self.low_level.to(self.device2)
+            observations = {
+                k: v.to(device=self.device2, non_blocking=True)
+                for k, v in observations.items()
+            }
+            discrete_actions = observations['vln_oracle_action_sensor']
+            discrete_action_mask = discrete_actions ==0
+            discrete_actions = (discrete_actions-1).masked_fill_(discrete_action_mask, 4)
 
-        del observations['vln_oracle_action_sensor']
-        batch = (observations,
-                low_recurrent_hidden_states,
-                prev_actions.to(
-                    device=self.device2, non_blocking=True
-                ),
-                not_done_masks.to(
-                    device=self.device2, non_blocking=True
-                ),
-                discrete_actions.view(-1)) 
+            del observations['vln_oracle_action_sensor']
+            batch = (observations,
+                    low_recurrent_hidden_states,
+                    prev_actions.to(
+                        device=self.device2, non_blocking=True
+                    ),
+                    not_done_masks.to(
+                        device=self.device2, non_blocking=True
+                    ),
+                    discrete_actions.view(-1)) 
 
-        del observations, prev_actions, not_done_masks
-        oracle_stop = oracle_stop.to(self.device2)
-        output, stop_out, low_recurrent_hidden_states = self.low_level(batch)
+            del observations, prev_actions, not_done_masks
+            oracle_stop = oracle_stop.to(self.device2)
+            output, stop_out, low_recurrent_hidden_states = self.low_level(batch)
 
-        corrected_actions = corrected_actions.to(self.device2)
+            corrected_actions = corrected_actions.to(self.device2)
 
-        action_mask = corrected_actions==0
-        output = output.masked_fill_(action_mask, 0)
-        output = output.to(dtype=torch.float)
-        corrected_actions = corrected_actions.to(dtype=torch.float)
-        low_level_action_loss = low_level_criterion(output, corrected_actions)
+            action_mask = corrected_actions==0
+            output = output.masked_fill_(action_mask, 0)
+            output = output.to(dtype=torch.float)
+            corrected_actions = corrected_actions.to(dtype=torch.float)
+            low_level_action_loss = low_level_criterion(output, corrected_actions)
 
-        mask = (oracle_stop!=-1)
-        oracle_stop = torch.masked_select(oracle_stop, mask)
-        stop_out = torch.masked_select(stop_out, mask)
-        low_level_stop_loss = low_level_stop_criterion(stop_out, oracle_stop)
-        
-
-        low_level_loss = low_level_action_loss + low_level_stop_loss
-
-        # with amp.scale_loss(low_level_loss, self.optimizer_low_level) as scaled_loss:
-        #     scaled_loss.backward()
-
-
-        low_level_loss.backward()
-        self.optimizer_low_level.step()
+            mask = (oracle_stop!=-1)
+            oracle_stop = torch.masked_select(oracle_stop, mask)
+            low_stop_output = torch.masked_select(low_stop_output, mask)
+            low_level_stop_loss = low_level_stop_criterion(low_stop_output, oracle_stop)
+            low_level_loss = low_level_action_loss + low_level_stop_loss
+            low_level_loss.backward()
+            self.optimizer_low_level.step()
 
         aux_loss_data =0
-
-        # low_level_loss_data = low_level_loss.detach()
         loss = (high_level_loss_data.item(), low_level_action_loss.detach().item(), 
                 low_level_stop_loss.detach().item(), aux_loss_data)
-        return loss, high_recurrent_hidden_states, low_recurrent_hidden_states
+        return loss, high_recurrent_hidden_states, low_recurrent_hidden_states, detached_state_low
 
     def _update_agent_val(
         self, observations, prev_actions, not_done_masks, corrected_actions, oracle_stop, high_recurrent_hidden_states, 
-        low_recurrent_hidden_states
+        low_recurrent_hidden_states, detached_state_low
     ):
 
         high_level_criterion = nn.CrossEntropyLoss(ignore_index=-1, reduction="mean")
         low_level_criterion = nn.MSELoss()
         low_level_stop_criterion = nn.BCEWithLogitsLoss()
-
         AuxLosses.clear()
 
         high_recurrent_hidden_states = repackage_hidden(high_recurrent_hidden_states)
         low_recurrent_hidden_states = repackage_hidden(low_recurrent_hidden_states)
 
-        batch = (observations, high_recurrent_hidden_states, prev_actions, not_done_masks)
-        output, high_recurrent_hidden_states = self.high_level(batch)
-        del batch
-        high_level_action_mask = observations['vln_oracle_action_sensor'] ==0
-        output = output.masked_fill_(high_level_action_mask, 0)
-        observations['vln_oracle_action_sensor'] = observations['vln_oracle_action_sensor'].squeeze(1).to(dtype=torch.int64)
-        high_level_loss = high_level_criterion(output,(observations['vln_oracle_action_sensor']-1))
-        del output
+        if self.config.DAGGER.INTER_MODULE_ATTN:
+            high_level_action_mask = observations['vln_oracle_action_sensor'] ==0
+            observations['vln_oracle_action_sensor'] = observations['vln_oracle_action_sensor'].to(dtype=torch.int64)
+            discrete_actions = observations['vln_oracle_action_sensor']
+            discrete_action_mask = discrete_actions ==0
+            discrete_actions = (discrete_actions-1).masked_fill_(discrete_action_mask, 4)
 
-        self.low_level.to(self.device2)
-        observations = {
-            k: v.to(device=self.device2, non_blocking=True)
-            for k, v in observations.items()
-        }
-        batch = (observations,
-                low_recurrent_hidden_states,
-                prev_actions.to(
-                    device=self.device2, non_blocking=True
-                ),
-                not_done_masks.to(
-                    device=self.device2, non_blocking=True
-                ),
-                observations['vln_oracle_action_sensor']) 
+            batch = (observations, high_recurrent_hidden_states, low_recurrent_hidden_states, 
+                    prev_actions, not_done_masks, discrete_actions.view(-1), detached_state_low)
+            
+            high_output, low_output, low_stop_output, high_recurrent_hidden_states, low_recurrent_hidden_states, detached_state_low = self.actor_critic(batch)
 
-        del observations, prev_actions, not_done_masks
-        oracle_stop = oracle_stop.to(self.device2)
-        output, stop_out, low_recurrent_hidden_states = self.low_level(batch)
+            del batch
+            high_output = high_output.masked_fill_(high_level_action_mask, 0)
+            high_level_loss = high_level_criterion(high_output,(observations['vln_oracle_action_sensor']-1).squeeze(1))
 
-        corrected_actions = corrected_actions.to(self.device2)
+            oracle_stop = oracle_stop.to(self.device2)
+            corrected_actions = corrected_actions.to(self.device2)
+            action_mask = corrected_actions==0
+            low_output = low_output.masked_fill_(action_mask, 0)
+            low_output = low_output.to(dtype=torch.float)
+            corrected_actions = corrected_actions.to(dtype=torch.float)
+            low_level_action_loss = low_level_criterion(low_output, corrected_actions)
 
-        action_mask = corrected_actions==0
-        output = output.masked_fill_(action_mask, 0)
-        output = output.to(dtype=torch.float)
-        corrected_actions = corrected_actions.to(dtype=torch.float)
-        low_level_action_loss = low_level_criterion(output, corrected_actions)
+            mask = (oracle_stop!=-1)
+            oracle_stop = torch.masked_select(oracle_stop, mask)
+            low_stop_output = torch.masked_select(low_stop_output, mask)
+            low_level_stop_loss = low_level_stop_criterion(low_stop_output, oracle_stop)
+        
+        
+        else:
+            batch = (observations, high_recurrent_hidden_states, prev_actions, not_done_masks)
+            output, high_recurrent_hidden_states = self.high_level(batch)
+            del batch
+            high_level_action_mask = observations['vln_oracle_action_sensor'] ==0
+            output = output.masked_fill_(high_level_action_mask, 0)
+            observations['vln_oracle_action_sensor'] = observations['vln_oracle_action_sensor'].squeeze(1).to(dtype=torch.int64)
+            high_level_loss = high_level_criterion(output,(observations['vln_oracle_action_sensor']-1))
+            del output
 
-        mask = (oracle_stop!=-1)
-        oracle_stop = torch.masked_select(oracle_stop, mask)
-        stop_out = torch.masked_select(stop_out, mask)
-        low_level_stop_loss = low_level_stop_criterion(stop_out, oracle_stop)
+            self.low_level.to(self.device2)
+            observations = {
+                k: v.to(device=self.device2, non_blocking=True)
+                for k, v in observations.items()
+            }
+            batch = (observations,
+                    low_recurrent_hidden_states,
+                    prev_actions.to(
+                        device=self.device2, non_blocking=True
+                    ),
+                    not_done_masks.to(
+                        device=self.device2, non_blocking=True
+                    ),
+                    observations['vln_oracle_action_sensor']) 
+
+            del observations, prev_actions, not_done_masks
+            oracle_stop = oracle_stop.to(self.device2)
+            output, stop_out, low_recurrent_hidden_states = self.low_level(batch)
+
+            corrected_actions = corrected_actions.to(self.device2)
+
+            action_mask = corrected_actions==0
+            output = output.masked_fill_(action_mask, 0)
+            output = output.to(dtype=torch.float)
+            corrected_actions = corrected_actions.to(dtype=torch.float)
+            low_level_action_loss = low_level_criterion(output, corrected_actions)
+
+            mask = (oracle_stop!=-1)
+            oracle_stop = torch.masked_select(oracle_stop, mask)
+            stop_out = torch.masked_select(stop_out, mask)
+            low_level_stop_loss = low_level_stop_criterion(stop_out, oracle_stop)
 
         aux_loss_data =0
 
         # low_level_loss_data = low_level_loss.detach()
         loss = (high_level_loss.item(), low_level_action_loss.item(), 
                 low_level_stop_loss.item(), aux_loss_data)
-        return loss, high_recurrent_hidden_states, low_recurrent_hidden_states
+        return loss, high_recurrent_hidden_states, low_recurrent_hidden_states, detached_state_low
 
 
     def train_epoch(self, diter, length, batch_size, epoch):
@@ -702,8 +770,12 @@ class RoboDaggerTrainer(BaseRLTrainer):
         low_level_stop_losses =[]
         low_level_total_losses=[]
 
-        self.high_level.train()
-        self.low_level.train()
+
+        if self.config.DAGGER.INTER_MODULE_ATTN:
+            self.actor_critic.train
+        else:
+            self.high_level.train()
+            self.low_level.train()
 
         for batch in tqdm.tqdm(
             diter, total=length // batch_size, leave=False
@@ -714,19 +786,33 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 corrected_actions_batch,
                 oracle_stop_batch
             ) = batch
-
-            high_recurrent_hidden_states = torch.zeros(
-                self.high_level.state_encoder.num_recurrent_layers,
-                self.config.DAGGER.BATCH_SIZE,
-                self.config.MODEL.STATE_ENCODER.hidden_size,
-                device=self.device,
-            )
-            low_recurrent_hidden_states = torch.zeros(
-                self.low_level.state_encoder.num_recurrent_layers,
-                self.config.DAGGER.BATCH_SIZE,
-                self.config.MODEL.STATE_ENCODER.hidden_size,
-                device=self.device2,
-            )
+            if self.config.DAGGER.INTER_MODULE_ATTN:
+                high_recurrent_hidden_states = torch.zeros(
+                    self.actor_critic.num_recurrent_layers,
+                    self.config.DAGGER.BATCH_SIZE,
+                    self.config.MODEL.STATE_ENCODER.hidden_size,
+                    device=self.device,
+                )
+                low_recurrent_hidden_states = torch.zeros(
+                    self.actor_critic.num_recurrent_layers,
+                    self.config.DAGGER.BATCH_SIZE,
+                    self.config.MODEL.STATE_ENCODER.hidden_size,
+                    device=self.device2,
+                )
+            else:
+                high_recurrent_hidden_states = torch.zeros(
+                    self.high_level.state_encoder.num_recurrent_layers,
+                    self.config.DAGGER.BATCH_SIZE,
+                    self.config.MODEL.STATE_ENCODER.hidden_size,
+                    device=self.device,
+                )
+                low_recurrent_hidden_states = torch.zeros(
+                    self.low_level.state_encoder.num_recurrent_layers,
+                    self.config.DAGGER.BATCH_SIZE,
+                    self.config.MODEL.STATE_ENCODER.hidden_size,
+                    device=self.device2,
+                )
+            detached_state_low = None
             batch_split = split_batch_tbptt(observations_batch, prev_actions_batch, not_done_masks, 
                     corrected_actions_batch, oracle_stop_batch, self.config.DAGGER.tbptt_steps, 
                     self.config.DAGGER.split_dim)
@@ -743,7 +829,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     for k, v in observations_batch.items()
                 }
                 try:
-                    loss, high_recurrent_hidden_states, low_recurrent_hidden_states= self._update_agent(
+                    loss, high_recurrent_hidden_states, low_recurrent_hidden_states, detached_state_low= self._update_agent(
                         observations_batch,
                         prev_actions_batch.to(
                             device=self.device, non_blocking=True
@@ -759,6 +845,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         ),
                         high_recurrent_hidden_states,
                         low_recurrent_hidden_states,
+                        detached_state_low
                     )
                     high_level_losses.append(loss[0])
                     low_level_action_losses.append(loss[1])
@@ -806,13 +893,13 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 # # For CyclicalLR
                 # self.scheduler.step()
 
-            logger.info(f"train_high_level_action_loss: {np.mean(high_level_losses)}")
-            logger.info(f"train_low_level_action_loss: {np.mean(low_level_action_losses)}")
-            logger.info(f"Train_low_level_stop_loss: {np.mean(low_level_stop_losses)}")
-            logger.info(f"Train_combined_loss: {np.mean(low_level_total_losses)}")
-            logger.info(f"train_aux_loss: {aux_loss}")
-            logger.info(f"Batches processed: {step_id}.")
-            logger.info(f"Epoch {epoch}.")
+            # logger.info(f"train_high_level_action_loss: {np.mean(high_level_losses)}")
+            # logger.info(f"train_low_level_action_loss: {np.mean(low_level_action_losses)}")
+            # logger.info(f"Train_low_level_stop_loss: {np.mean(low_level_stop_losses)}")
+            # logger.info(f"Train_combined_loss: {np.mean(low_level_total_losses)}")
+            # logger.info(f"train_aux_loss: {aux_loss}")
+            # logger.info(f"Batches processed: {step_id}.")
+            # logger.info(f"Epoch {epoch}.")
             wandb.log({
             "Train High Level Action Loss": np.mean(high_level_losses),
             "Train Low Level Action Loss": np.mean(low_level_action_losses),
@@ -828,12 +915,16 @@ class RoboDaggerTrainer(BaseRLTrainer):
     def val_epoch(self, diter, length, batch_size, epoch):
         loss, aux_loss = 0, 0
         step_id = 0
-        high_level_losses=[]
-        low_level_total_losses=[]
-        val_losses =[]
+        high_level_losses = []
+        low_level_total_losses = []
+        val_high_losses = []
+        val_low_losses = []
+        if self.config.DAGGER.INTER_MODULE_ATTN:
+            self.actor_critic.train()
+        else:
+            self.high_level.eval()
+            self.low_level.eval()
 
-        self.high_level.eval()
-        self.low_level.eval()
         with torch.no_grad():
             for batch in tqdm.tqdm(
                 diter, total=length // batch_size, leave=False
@@ -845,18 +936,33 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     oracle_stop_batch
                 ) = batch
 
-                high_recurrent_hidden_states = torch.zeros(
-                    self.high_level.state_encoder.num_recurrent_layers,
-                    self.config.DAGGER.BATCH_SIZE,
-                    self.config.MODEL.STATE_ENCODER.hidden_size,
-                    device=self.device,
-                )
-                low_recurrent_hidden_states = torch.zeros(
-                    self.low_level.state_encoder.num_recurrent_layers,
-                    self.config.DAGGER.BATCH_SIZE,
-                    self.config.MODEL.STATE_ENCODER.hidden_size,
-                    device=self.device2,
-                )
+                if self.config.DAGGER.INTER_MODULE_ATTN:
+                    high_recurrent_hidden_states = torch.zeros(
+                        self.actor_critic.num_recurrent_layers,
+                        self.config.DAGGER.BATCH_SIZE,
+                        self.config.MODEL.STATE_ENCODER.hidden_size,
+                        device=self.device,
+                    )
+                    low_recurrent_hidden_states = torch.zeros(
+                        self.actor_critic.num_recurrent_layers,
+                        self.config.DAGGER.BATCH_SIZE,
+                        self.config.MODEL.STATE_ENCODER.hidden_size,
+                        device=self.device2,
+                    )
+                else:
+                    high_recurrent_hidden_states = torch.zeros(
+                        self.high_level.state_encoder.num_recurrent_layers,
+                        self.config.DAGGER.BATCH_SIZE,
+                        self.config.MODEL.STATE_ENCODER.hidden_size,
+                        device=self.device,
+                    )
+                    low_recurrent_hidden_states = torch.zeros(
+                        self.low_level.state_encoder.num_recurrent_layers,
+                        self.config.DAGGER.BATCH_SIZE,
+                        self.config.MODEL.STATE_ENCODER.hidden_size,
+                        device=self.device2,
+                    )
+                detached_state_low = None
                 batch_split = split_batch_tbptt(observations_batch, prev_actions_batch, not_done_masks, 
                         corrected_actions_batch, oracle_stop_batch, self.config.DAGGER.tbptt_steps, 
                         self.config.DAGGER.split_dim)
@@ -872,7 +978,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         k: v.to(device=self.device, non_blocking=True)
                         for k, v in observations_batch.items()
                     }
-                    loss, high_recurrent_hidden_states, low_recurrent_hidden_states= self._update_agent_val(
+                    loss, high_recurrent_hidden_states, low_recurrent_hidden_states, detached_state_low= self._update_agent_val(
                         observations_batch,
                         prev_actions_batch.to(
                             device=self.device, non_blocking=True
@@ -888,6 +994,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         ),
                         high_recurrent_hidden_states,
                         low_recurrent_hidden_states,
+                        detached_state_low
                     )
                     high_level_losses.append(loss[0])
                     # low_level_action_losses.append(loss[1])
@@ -909,10 +1016,13 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 "Val High Level Action Loss": np.mean(high_level_losses),
                 "Val Low_level Total Loss": np.mean(low_level_total_losses),
                 "Val Aux Loss": aux_loss})
-                val_losses.append(np.mean(low_level_total_losses))
+                val_low_losses.append(np.mean(low_level_total_losses))
+                val_high_losses.append(np.mean(high_level_losses))
                 step_id += 1
             wandb.log({
-            "Val Loss epoch": np.mean(val_losses),"epoch":epoch })
+            "Val High level Loss epoch": np.mean(val_high_losses),
+            "Val Low level Loss epoch": np.mean(val_low_losses)
+            })
 
     def train(self) -> None:
         r"""Main method for training DAgger.
@@ -964,18 +1074,25 @@ class RoboDaggerTrainer(BaseRLTrainer):
             self.config.DAGGER.LOAD_FROM_CKPT,
             self.config.DAGGER.CKPT_TO_LOAD,
         )
-
-        logger.info(
-            "agent number of high level parameters: {}".format(
-                sum(param.numel() for param in self.high_level.parameters())
+        if self.config.DAGGER.INTER_MODULE_ATTN:
+            logger.info(
+                "agent number of high level parameters: {}".format(
+                    sum(param.numel() for param in self.actor_critic.parameters())
+                )
             )
-        )
-
-        logger.info(
-            "agent number of low level parameters: {}".format(
-                sum(param.numel() for param in self.low_level.parameters())
+        
+        else:
+            logger.info(
+                "agent number of high level parameters: {}".format(
+                    sum(param.numel() for param in self.high_level.parameters())
+                )
             )
-        )
+
+            logger.info(
+                "agent number of low level parameters: {}".format(
+                    sum(param.numel() for param in self.low_level.parameters())
+                )
+            )
         # logger.info(
         #     "agent number of trainable parameters: {}".format(
         #         sum(
@@ -1017,9 +1134,9 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     batch_size=self.config.DAGGER.BATCH_SIZE,
                     shuffle=False,
                     collate_fn=collate_fn,
-                    pin_memory=False,
+                    pin_memory=True,
                     drop_last=True,  # drop last batch if smaller
-                    num_workers=0,
+                    num_workers=1,
                 )
 
                 dataset_eval = IWTrajectoryDataset(
@@ -1035,9 +1152,9 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     batch_size=self.config.DAGGER.BATCH_SIZE,
                     shuffle=False,
                     collate_fn=collate_fn,
-                    pin_memory=False,
+                    pin_memory=True,
                     drop_last=True,  # drop last batch if smaller
-                    num_workers=0,
+                    num_workers=1,
                 )
 
                 AuxLosses.activate()

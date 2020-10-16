@@ -6,17 +6,17 @@ TRAINER_NAME : "robo_vln_trainer"
 
 TENSORBOARD_DIR: /srv/share/mirshad7/data/robo-vln/tensorboard_dirs/cma
 CHECKPOINT_FOLDER: /srv/share/mirshad7/data/robo-vln/checkpoints/cma
-EVAL_CKPT_PATH_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/cma
+EVAL_CKPT_PATH_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/cma/ckpt.32.pth 
 
-VIDEO_DIR: "videos/debug/seq2seq_text_glove_complete"
+VIDEO_DIR: "videos/debug/cma"
 PLOT_ATTENTION: False
 VIDEO_OPTION: []  # options: "disk", "tensorboard"
 
 EVAL:
   USE_CKPT_CONFIG: False
-  SPLIT: val_seen
-  EPISODE_COUNT: 570
-  VAL_LOG_DIR : validation_logging/cma
+  SPLIT: val_unseen
+  EPISODE_COUNT: 1224
+  VAL_LOG_DIR : validation_logging/cma/unseen
 DAGGER:
   ITERATIONS: 1
   EPOCHS: 25

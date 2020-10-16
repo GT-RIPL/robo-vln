@@ -26,7 +26,7 @@ DAGGER:
   COLLECT_DATA_SPLIT: val_seen
   BATCH_SIZE: 1
   P: 1.0
-  PRELOAD_LMDB_FEATURES: False
+  PRELOAD_LMDB_FEATURES: True
   LMDB_FEATURES_DIR: /srv/share3/mirshad7/data/robo-vln/trajectory_dir/robo_complete/val_seen/trajectories.lmdb
 
 MODEL:
