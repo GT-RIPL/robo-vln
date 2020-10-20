@@ -1,0 +1,36 @@
+BASE_TASK_CONFIG_PATH: habitat_extensions/config/robo_vlnce_task.yaml
+SIMULATOR_GPU_ID: [0]
+TORCH_GPU_ID: 0
+NUM_PROCESSES: 1
+TRAINER_NAME : "hierarchical_trainer"
+
+TENSORBOARD_DIR: /home/mirshad7/data/robo-vln/checkpoints/hierarchical_cross_modal
+CHECKPOINT_FOLDER: /home/mirshad7/data/robo-vln/checkpoints/hierarchical_cross_modal
+EVAL_CKPT_PATH_DIR: /home/mirshad7/data/robo-vln/checkpoints/hierarchical_cross_modal
+
+VIDEO_DIR: "data/robo-vln/tensorboard_dirs/hierarchical_s2s/run_2/videos"
+PLOT_ATTENTION: False
+VIDEO_OPTION: []  # options: "disk", "tensorboard"
+
+EVAL:
+  USE_CKPT_CONFIG: False
+  SPLIT: val_unseen
+  EPISODE_COUNT: 1224
+  #576
+  VAL_LOG_DIR : validation_logging/seq2seq_bert/unseen
+DAGGER:
+  ITERATIONS: 1
+  EPOCHS: 45
+  UPDATE_SIZE: 20
+  BATCH_SIZE: 1
+  P: 1.0
+  PRELOAD_LMDB_FEATURES: True
+  INTER_MODULE_ATTN: True
+  LMDB_FEATURES_DIR: /home/mirshad7/data/robo-vln/trajectory_dir/robo_complete/train/trajectories.lmdb
+  LMDB_EVAL_DIR: /home/mirshad7/data/robo-vln/trajectory_dir/robo_complete/val_seen/trajectories.lmdb
+
+MODEL:
+  INSTRUCTION_ENCODER:
+    final_state_only: False
+    use_pretrained_embeddings: False
+    is_bert: True

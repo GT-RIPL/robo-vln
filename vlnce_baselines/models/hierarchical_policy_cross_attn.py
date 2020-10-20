@@ -11,7 +11,7 @@ from vlnce_baselines.models.seq2seq_lowlevel_ic import Seq2Seq_LowLevel
 from collections import defaultdict
 import time
 
-class HierarchicalNet(nn.Module):
+class HierarchicalCMANet(nn.Module):
     r"""A baseline sequence to sequence network that concatenates instruction,
     RGB, and depth encodings before decoding an action distribution with an RNN.
 
@@ -57,8 +57,6 @@ class HierarchicalNet(nn.Module):
 
         self.high_level.to(self.device1)
         self.low_level.to(self.device2)
-
-        self.train()
 
 
     @property

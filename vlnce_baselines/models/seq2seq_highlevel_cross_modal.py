@@ -17,6 +17,7 @@ from vlnce_baselines.models.encoders.resnet_encoders import (
     TorchVisionResNet50,
     VlnResnetDepthEncoder,
 )
+from transformers import BertModel
 
 from vlnce_baselines.models.transformer.transformer import PositionEmbedding2DLearned
 from vlnce_baselines.models.transformer.transformer import ImageEncoder_with_PosEncodings
@@ -107,10 +108,7 @@ class Seq2Seq_HighLevel(nn.Module):
             self.prev_action_embedding = nn.Embedding(num_actions + 1, 32)
 
         # Init the RNN state decoder
-        rnn_input_size = (
-            self.instruction_encoder.output_size
-            + model_config.DEPTH_ENCODER.output_size
-            + model_config.RGB_ENCODER.output_size
+        rnn_input_size = (self.model_config.IMAGE_CROSS_MODAL_ENCODER.d_model
         )
 
         if model_config.SEQ2SEQ.use_prev_action:
@@ -131,8 +129,6 @@ class Seq2Seq_HighLevel(nn.Module):
         self.linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, num_actions)
 
         self._init_layers()
-
-        self.train()
         
 
     def pad_instructions(self, observations):
