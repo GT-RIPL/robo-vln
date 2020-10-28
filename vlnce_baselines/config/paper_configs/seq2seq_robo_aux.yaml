@@ -1,0 +1,40 @@
+BASE_TASK_CONFIG_PATH: habitat_extensions/config/robo_vlnce_task.yaml
+SIMULATOR_GPU_ID: [0]
+TORCH_GPU_ID: 0
+NUM_PROCESSES: 1
+TRAINER_NAME : "robo_vln_trainer"
+
+TENSORBOARD_DIR: /home/mirshad7/data/robo-vln/tensorboard_dirs/seq2seq_aux
+CHECKPOINT_FOLDER: /home/mirshad7/data/robo-vln/checkpoints/seq2seq_aux
+EVAL_CKPT_PATH_DIR: /home/mirshad7/data/robo-vln/checkpoints/seq2seq_aux/ckpt.27.pth
+
+VIDEO_DIR: "videos/debug/seq2seq_aux_2"
+PLOT_ATTENTION: False
+VIDEO_OPTION: ["disk"]  # options: "disk", "tensorboard"
+
+EVAL:
+  USE_CKPT_CONFIG: False
+  SPLIT: val_seen
+  EPISODE_COUNT: 10
+  VAL_LOG_DIR : validation_logging/seq2seq_aux
+DAGGER:
+  ITERATIONS: 1
+  EPOCHS: 25
+  UPDATE_SIZE: 7739
+  #7739  
+  #570
+  #1224
+  COLLECT_DATA_SPLIT: train
+  BATCH_SIZE: 1
+  P: 1.0
+  PRELOAD_LMDB_FEATURES: True
+  LMDB_FEATURES_DIR: /home/mirshad7/data/robo-vln/trajectory_dir/robo_complete/train/trajectories.lmdb
+  LMDB_EVAL_DIR: /home/mirshad7/data/robo-vln/trajectory_dir/robo_complete/val_seen/trajectories.lmdb
+
+MODEL:
+  LANG_ATTN:
+    use: False
+  INSTRUCTION_ENCODER:
+    final_state_only: True
+    use_pretrained_embeddings: True
+    is_bert: False

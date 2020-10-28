@@ -29,10 +29,11 @@ class Seq2SeqNet(nn.Module):
         RNN state encoder
     """
 
-    def __init__(self, observation_space: Space, num_actions: int, model_config: Config, batch_size: int):
+    def __init__(self, observation_space: Space, num_actions: int, num_sub_tasks:int, model_config: Config, batch_size: int):
         super().__init__()
         self.model_config = model_config
         self.batch_size = batch_size
+        self.num_sub_tasks = num_sub_tasks
         device = (
             torch.device("cuda", model_config.TORCH_GPU_ID)
             if torch.cuda.is_available()
@@ -104,11 +105,10 @@ class Seq2SeqNet(nn.Module):
             self.model_config.STATE_ENCODER.hidden_size, 1
         )
         self.linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, num_actions)
+        self.sub_goal_linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, self.num_sub_tasks)
         self.stop_linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, 1)
 
         self._init_layers()
-
-        self.train()
 
 
     def pad_instructions(self, observations):
@@ -186,4 +186,5 @@ class Seq2SeqNet(nn.Module):
 
         output = self.linear(x)
         stop_out = self.stop_linear(x)
-        return output, stop_out, rnn_hidden_states
+        sub_task_out = self.sub_goal_linear(x)
+        return output, stop_out, sub_task_out, rnn_hidden_states
