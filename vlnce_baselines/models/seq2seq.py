@@ -186,5 +186,6 @@ class Seq2SeqNet(nn.Module):
 
         output = self.linear(x)
         stop_out = self.stop_linear(x)
-        sub_task_out = self.sub_goal_linear(x)
-        return output, stop_out, sub_task_out, rnn_hidden_states
+        # sub_task_out = self.sub_goal_linear(x)
+        # return output, stop_out, sub_task_out, rnn_hidden_states
+        return output, stop_out, rnn_hidden_states

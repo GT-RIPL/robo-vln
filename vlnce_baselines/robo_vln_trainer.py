@@ -63,22 +63,22 @@ from vlnce_baselines.models.seq2seq_sem_text_attn import Seq2Seq_Sem_Text_Attn
 from vlnce_baselines.models.hybrid_cma_mp import TransformerHybridPolicy
 from vlnce_baselines.models.seq2seq import Seq2SeqNet
 
-# #WandB – Login to your wand
-# # b account so you can log all your metrics
-# wandb.login()
+#WandB – Login to your wand
+# b account so you can log all your metrics
+wandb.login()
 
-# wandb.init(project="Flat_Sequence_to_Sequence", sync_tensorboard=True)
-# # If you don't want your script to sync to the cloud
-# # os.environ['WANDB_MODE'] = 'dryrun'
+wandb.init(project="PM", sync_tensorboard=True)
+# If you don't want your script to sync to the cloud
+# os.environ['WANDB_MODE'] = 'dryrun'
 
-# wb_config = wandb.config
-# wb_config.LR = 1e-4
-# wb_config.EPOCHS = 20
-# wb_config.BATCH_SIZE = 1
+wb_config = wandb.config
+wb_config.LR = 1e-4
+wb_config.EPOCHS = 20
+wb_config.BATCH_SIZE = 1
 
-# with warnings.catch_warnings():
-#     warnings.filterwarnings("ignore", category=FutureWarning)
-#     import tensorflow as tf
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    import tensorflow as tf
 
 # from pynvml import *
 # nvmlInit()
@@ -573,7 +573,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         batch = (observations, recurrent_hidden_states, prev_actions, not_done_masks)
         del recurrent_hidden_states, prev_actions, not_done_masks
         
-        if config.FLAT_AUX_LOSS.use:
+        if self.config.MODEL.FLAT_AUX_LOSS.use:
             output, stop_out, sub_goal_out, recurrent_hidden_states = self.actor_critic(batch)
 
             high_level_action_mask = observations['vln_oracle_action_sensor'] ==0
@@ -597,15 +597,16 @@ class RoboDaggerTrainer(BaseRLTrainer):
         stop_loss   = stop_criterion(stop_out, oracle_stop)
 
 
-        if config.FLAT_AUX_LOSS.use:
+        if self.config.MODEL.FLAT_AUX_LOSS.use:
             loss = action_loss + stop_loss + sub_goal_loss
         else: 
-            loss = action_loss + stop_loss 
+            aux_mask = ~action_mask[:,0]
+            aux_loss = AuxLosses.reduce(aux_mask)
+            loss = action_loss + stop_loss +aux_loss
 
         loss.backward()
         self.optimizer.step()
-        aux_loss_data =0
-        loss = (action_loss.detach().item(), stop_loss.detach().item(), aux_loss_data)
+        loss = (action_loss.detach().item(), stop_loss.detach().item(), aux_loss.item())
         del output, action_loss
         return loss, recurrent_hidden_states
 
@@ -623,7 +624,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         
 
 
-        if self.config.FLAT_AUX_LOSS.use:
+        if self.config.MODEL.FLAT_AUX_LOSS.use:
             output, stop_out, sub_goal_out, recurrent_hidden_states = self.actor_critic(batch)
             high_level_action_mask = observations['vln_oracle_action_sensor'] ==0
             sub_goal_out = sub_goal_out.masked_fill_(high_level_action_mask, 0)
@@ -648,12 +649,13 @@ class RoboDaggerTrainer(BaseRLTrainer):
         oracle_stop = torch.masked_select(oracle_stop, mask)
         stop_out = torch.masked_select(stop_out, mask)
         stop_loss   = stop_criterion(stop_out, oracle_stop)
-        loss = action_loss + stop_loss
+        # loss = action_loss + stop_loss
 
-        aux_loss_data =0
-        loss = (action_loss.item(), stop_loss.item(), aux_loss_data)
+        aux_mask = ~action_mask[:,0]
+        aux_loss = AuxLosses.reduce(aux_mask)
+        loss = (action_loss.item(), stop_loss.item(), aux_loss.item())
 
-        if self.config.FLAT_AUX_LOSS.use:
+        if self.config.MODEL.FLAT_AUX_LOSS.use:
             return loss, recurrent_hidden_states, accuracy, total
         else:
             return loss, recurrent_hidden_states
@@ -736,11 +738,12 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     writer.add_scalar(f"Action Loss", output[0], train_steps)
                     writer.add_scalar(f"Stop Loss", output[1], train_steps)
 
-                    if self.config.FLAT_AUX_LOSS.use:
+                    if self.config.MODEL.FLAT_AUX_LOSS.use:
                         writer.add_scalar(f"Sub Goal Loss", output[2], train_steps)
                         writer.add_scalar(f"Total Loss", output[0] + output[1] + output[2], train_steps)
                     else: 
-                        writer.add_scalar(f"Total Loss", output[0] + output[1], train_steps)
+                        writer.add_scalar(f"Aux Loss", output[2], train_steps)
+                        writer.add_scalar(f"Total Loss", output[0] + output[1]+output[2], train_steps)
                     train_steps += 1
                     # action_losses.append(output[0])
                     # stop_losses.append(output[1])
@@ -856,7 +859,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         k: v.to(device=self.device, non_blocking=True)
                         for k, v in observations_batch.items()
                     }
-                    output, recurrent_hidden_states, accuracy, total= self._update_agent_val(
+                    output, recurrent_hidden_states= self._update_agent_val(
                         observations_batch,
                         prev_actions_batch.to(
                             device=self.device, non_blocking=True
@@ -873,12 +876,12 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         recurrent_hidden_states,
                     )
 
-                    correct_labels+= accuracy 
-                    total_correct+=total
+                    # correct_labels+= accuracy 
+                    # total_correct+=total
 
                     writer.add_scalar(f"Val Action Loss", output[0], val_steps)
                     writer.add_scalar(f"Val Stop Loss", output[1], val_steps)
-                    writer.add_scalar(f"Sub Goal Loss", output[2], val_steps)
+                    writer.add_scalar(f"Aux Loss", output[2], val_steps)
                     writer.add_scalar(f"Val Total Loss", output[0]+output[1]+ output[2], val_steps)
                     val_steps += 1
                     val_losses.append(output[0] + output[1] + output[2])
@@ -898,9 +901,9 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 # end = time.time()
             # writer.add_scalar(f"Val_losses_iter_{dagger_it}", val_losses.mean(), epoch)
 
-            final_accuracy = 100 * correct_labels / total_correct
+            # final_accuracy = 100 * correct_labels / total_correct
             writer.add_scalar(f"Val Loss Epoch", np.mean(val_losses), val_steps)
-            writer.add_scalar(f"Validation Accuracy", final_accuracy, epoch)
+            # writer.add_scalar(f"Validation Accuracy", final_accuracy, epoch)
             return val_steps
 
             
