@@ -4,20 +4,20 @@ TORCH_GPU_ID: 0
 NUM_PROCESSES: 1
 TRAINER_NAME : "hierarchical_trainer"
 
-TENSORBOARD_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/hierarchical_ima
-CHECKPOINT_FOLDER: /srv/share/mirshad7/data/robo-vln/checkpoints/hierarchical_ima
-EVAL_CKPT_PATH_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/hierarchical_ima
+TENSORBOARD_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/hierarchical_ima/urun
+CHECKPOINT_FOLDER: /srv/share/mirshad7/data/robo-vln/checkpoints/hierarchical_ima/urun
+EVAL_CKPT_PATH_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/hierarchical_ima 
 
-VIDEO_DIR: "data/robo-vln/tensorboard_dirs/hierarchical_s2s/run_2/videos"
+VIDEO_DIR: "videos/debug/hierarchical_ima/"
 PLOT_ATTENTION: False
-VIDEO_OPTION: []  # options: "disk", "tensorboard"
+VIDEO_OPTION: ["disk"]  # options: "disk", "tensorboard"
 
 EVAL:
   USE_CKPT_CONFIG: False
-  SPLIT: val_unseen
-  EPISODE_COUNT: 1224
+  SPLIT: val_seen
+  EPISODE_COUNT: 100
   #576
-  VAL_LOG_DIR : validation_logging/seq2seq_bert/unseen
+  VAL_LOG_DIR : validation_logging/hierarchical_ima/run_2/ckpt48/run_2
 DAGGER:
   ITERATIONS: 1
   EPOCHS: 45

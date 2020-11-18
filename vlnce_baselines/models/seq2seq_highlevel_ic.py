@@ -108,10 +108,7 @@ class Seq2Seq_HighLevel(nn.Module):
         self.inter_module_attn = InterModuleAttnDecoder(model_config.INTER_MODULE_ATTN)
         self.fc = nn.Linear(self.model_config.STATE_ENCODER.hidden_size*2, self.model_config.STATE_ENCODER.hidden_size)
         self.linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, num_actions)
-
         self._init_layers()
-
-        self.train()
         
 
     def pad_instructions(self, observations):
@@ -142,7 +139,6 @@ class Seq2Seq_HighLevel(nn.Module):
 
     def forward_vnl(self, observations):
         # forwards for all timestep
-        cnn_time = time.time()
         instruction_embedding = self.instruction_encoder(observations['instruction'].long())
         depth_embedding = self.depth_encoder(observations)
         rgb_embedding = self.rgb_encoder(observations)
@@ -165,30 +161,6 @@ class Seq2Seq_HighLevel(nn.Module):
         depth_embedding: [batch_size x DEPTH_ENCODER.output_size]
         rgb_embedding: [batch_size x RGB_ENCODER.output_size]
         """
-
-        # observations, rnn_hidden_states, prev_actions, masks = batch
-        # del batch
-
-        # instructions = self.pad_instructions(observations)
-        # del observations['instruction']
-        # cnn_time = time.time()
-
-        # instruction_embedding = self.instruction_encoder(observations['instruction'].long())
-        # depth_embedding = self.depth_encoder(observations)
-        # rgb_embedding = self.rgb_encoder(observations)
-        # if self.model_config.ablate_instruction:
-        #     instruction_embedding = instruction_embedding * 0
-        # if self.model_config.ablate_depth:
-        #     depth_embedding = depth_embedding * 0
-        # if self.model_config.ablate_rgb:
-        #     rgb_embedding = rgb_embedding * 0
-
-        # instruction_embedding = instruction_embedding.expand(rgb_embedding.shape[0], instruction_embedding.shape[1])
-        # x = torch.cat([instruction_embedding, depth_embedding, rgb_embedding], dim=1)
-        # print("cnn high level time", time.time()-cnn_time)
-        rest_time = time.time()
-
-        # del instruction_embedding, depth_embedding, rgb_embedding
         if self.model_config.SEQ2SEQ.use_prev_action:
             prev_actions_embedding = self.prev_action_embedding(
                 ((prev_actions.float() + 1) * masks).long().view(-1)
@@ -209,10 +181,12 @@ class Seq2Seq_HighLevel(nn.Module):
                 self.model_config.PROGRESS_MONITOR.alpha,
             )
         detached_state_high = x.clone().detach()
-
-        if low_level_out is not None:
-            inter_module_out = self.inter_module_attn(x.unsqueeze(0), low_level_out, None, None)
-            x = self.fc(torch.cat((x, inter_module_out.squeeze(0)), 1))
+        if low_level_out is None:
+            inter_module_out = torch.zeros(1,1, self.model_config.STATE_ENCODER.hidden_size).to(x.device)
+        else:
+            inter_module_out = self.inter_module_attn(low_level_out, x.unsqueeze(0), None, None)
+        
+        x = self.fc(torch.cat((x, inter_module_out.squeeze(0)), 1))
 
         x = self.linear(x)
         # print("rest time",time.time() - rest_time)

@@ -86,7 +86,7 @@ class HierarchicalNet(nn.Module):
 
     #     return obs, prev_actions_single, masks_single, discrete_actions_single
 
-    def get_single_obs(self, high_state, low_state, prev_actions, masks, index):
+    def get_single_obs(self, high_state, low_state, prev_actions, masks, discrete_actions, index):
         # obs = defaultdict()
         # for sensor in observations:
         #     if sensor =='instruction':
@@ -99,9 +99,9 @@ class HierarchicalNet(nn.Module):
         # print("obs",obs.shape)
         prev_actions_single = prev_actions[index].unsqueeze(0)
         masks_single = masks[index].unsqueeze(0)
-        # discrete_actions_single = discrete_actions[index].unsqueeze(0)
+        discrete_actions_single = discrete_actions[index].unsqueeze(0)
 
-        return hs, ls, prev_actions_single, masks_single
+        return hs, ls, prev_actions_single, masks_single, discrete_actions_single
 
 
     def forward(self, batch):
@@ -121,12 +121,12 @@ class HierarchicalNet(nn.Module):
             k: v.to(device=self.device2, non_blocking=True)
             for k, v in observations.items()
         }
-        low_state = self.low_level.forward_vnl(observations, discrete_actions.to(self.device2, non_blocking=True))
+        low_state = self.low_level.forward_vnl(observations)
         progress = observations['progress']
         del observations
         for i in range(max_len):
             # if self.batch_size!=max_len: # only works for Batch Size=1
-            high_state_single, low_state_single, prev_actions_single, masks_single = self.get_single_obs(high_state, low_state, prev_actions, masks, i)
+            high_state_single, low_state_single, prev_actions_single, masks_single, da_single = self.get_single_obs(high_state, low_state, prev_actions, masks, discrete_actions, i)
             high_level_output, high_recurrent_hidden_states, detached_state_high = self.high_level(high_state_single, 
                                                                                                    progress, 
                                                                                                    high_recurrent_hidden_states, 
@@ -138,6 +138,7 @@ class HierarchicalNet(nn.Module):
             # for k, v in obs_single.items()
             # }
             low_level_output, stop_out, low_recurrent_hidden_states, detached_state_low =  self.low_level(low_state_single,
+                                                                            da_single.to(self.device2, non_blocking=True),
                                                                             progress.to
                                                                             (self.device2,non_blocking=True),
                                                                             low_recurrent_hidden_states,

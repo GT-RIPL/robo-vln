@@ -17,6 +17,8 @@ import apex.amp as amp
 from fastdtw import fastdtw
 import gzip 
 
+from transformers.optimization import Adafactor
+
 import lmdb
 import msgpack_numpy
 import numpy as np
@@ -47,8 +49,8 @@ from vlnce_baselines.common.env_utils import (
     SimpleRLEnv
 )
 from vlnce_baselines.common.utils import transform_obs, batch_obs, batch_obs_data_collect, repackage_hidden, split_batch_tbptt, repackage_mini_batch
-# from vlnce_baselines.models.seq2seq_highlevel import Seq2Seq_HighLevel
-# from vlnce_baselines.models.seq2seq_highlevel_cma import Seq2Seq_HighLevel_CMA as Seq2Seq_HighLevel
+#from vlnce_baselines.models.seq2seq_highlevel import Seq2Seq_HighLevel
+# # from vlnce_baselines.models.seq2seq_highlevel_cma import Seq2Seq_HighLevel_CMA as Seq2Seq_HighLevel
 from vlnce_baselines.models.seq2seq_highlevel_cma_vlnce import Seq2Seq_HighLevel_CMA as Seq2Seq_HighLevel
 from vlnce_baselines.models.seq2seq_lowlevel import Seq2Seq_LowLevel
 from vlnce_baselines.models.hierarchical_policy import HierarchicalNet
@@ -56,22 +58,22 @@ from vlnce_baselines.models.hierarchical_policy_eval import HierarchicalEvalNet
 from vlnce_baselines.models.hierarchical_policy_eval_ca import HierarchicalCMANetEval
 import time
 
-# with warnings.catch_warnings():
-#     warnings.filterwarnings("ignore", category=FutureWarning)
-#     import tensorflow as tf
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    import tensorflow as tf
 
-# # from pynvml import *
-# # nvmlInit()
+# from pynvml import *
+# nvmlInit()
 
-# # WandB – Login to your wandb account so you can log all your metrics
-# wandb.login()
+# WandB – Login to your wandb account so you can log all your metrics
+wandb.login()
 
-# wandb.init(project="hierarchical_cma", sync_tensorboard=True)
+wandb.init(project="hierarchical_inter_module", sync_tensorboard=True)
 
-# wb_config = wandb.config
-# wb_config.LR = 1e-4
-# wb_config.EPOCHS = 20
-# wb_config.BATCH_SIZE = 1
+wb_config = wandb.config
+wb_config.LR = 1e-4
+wb_config.EPOCHS = 20
+wb_config.BATCH_SIZE = 1
 
 
 class ObservationsDict(dict):
@@ -350,7 +352,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
         config.freeze()
 
         if self.config.DAGGER.INTER_MODULE_ATTN:
-            self.actor_critic = HierarchicalEvalNet(                
+            self.actor_critic = HierarchicalNet(                
                 observation_space=self.envs.observation_space,
                 num_actions=self.envs.action_space.n,
                 num_sub_tasks = self.envs.action_space.n,
@@ -379,14 +381,15 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     batch_size = self.config.DAGGER.BATCH_SIZE,
                 )
                 
-            self.optimizer_high_level = torch.optim.Adam(
-                self.high_level.parameters(), lr=self.config.DAGGER.LR,betas=(0.9, 0.98), eps=1e-9
-            )
+            self.optimizer_high_level = torch.optim.AdamW(
+                self.high_level.parameters(), lr=self.config.DAGGER.LR, weight_decay=self.config.MODEL.TRANSFORMER.weight_decay)
+
+            # self.optimizer_high_level = Adafactor(self.high_level.parameters(), lr=0.001, scale_parameter=False, relative_step=False)
             self.optimizer_low_level = torch.optim.Adam(
                 self.low_level.parameters(), lr=self.config.DAGGER.LR,weight_decay=self.config.MODEL.TRANSFORMER.weight_decay
             )
 
-            # self.scheduler_high_level = torch.optim.lr_scheduler.CyclicLR(self.optimizer_high_level, base_lr=2e-6, max_lr=1e-4, step_size_up=1000,step_size_down=70000, cycle_momentum=False)
+            self.scheduler_high_level = torch.optim.lr_scheduler.CyclicLR(self.optimizer_high_level, base_lr=2e-6, max_lr=1e-4, step_size_up=1000,step_size_down=30000, cycle_momentum=False)
 
             if not self.config.MODEL.TRANSFORMER.split_gpus:
                 self.high_level.to(self.device)
@@ -593,7 +596,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
             del batch
             high_output = high_output.masked_fill_(high_level_action_mask, 0)
-            high_level_loss = high_level_criterion(high_output,(observations['vln_oracle_action_sensor']-1).squeeze(1))
+            high_level_loss = high_level_criterion(high_output,(observations['vln_oracle_action_sensor'].squeeze(1)-1))
             high_level_loss.backward()
             high_level_loss_data = high_level_loss.detach()
             del high_output
@@ -700,7 +703,15 @@ class RoboDaggerTrainer(BaseRLTrainer):
 
             del batch
             high_output = high_output.masked_fill_(high_level_action_mask, 0)
-            high_level_loss = high_level_criterion(high_output,(observations['vln_oracle_action_sensor']-1).squeeze(1))
+            high_level_loss = high_level_criterion(high_output,(observations['vln_oracle_action_sensor'].squeeze(1)-1))
+
+
+            predicted = torch.argmax(high_output, dim=1)
+            corrected_mask = ~high_level_action_mask
+            correct = torch.masked_select((observations['vln_oracle_action_sensor'].squeeze(1)-1), corrected_mask)
+            predicted = torch.masked_select(predicted, corrected_mask)
+            accuracy = (predicted == correct).sum().item()
+            total = predicted.size(0)
 
             oracle_stop = oracle_stop.to(self.device2)
             corrected_actions = corrected_actions.to(self.device2)
@@ -729,7 +740,6 @@ class RoboDaggerTrainer(BaseRLTrainer):
             corrected_mask = ~high_level_action_mask
             correct = torch.masked_select((observations['vln_oracle_action_sensor']-1), corrected_mask)
             predicted = torch.masked_select(predicted, corrected_mask)
-            output = output.masked_fill_(high_level_action_mask, 0)
             accuracy = (predicted == correct).sum().item()
             total = predicted.size(0)
             del output
@@ -908,8 +918,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
                         action_loss += output[1]
                         aux_loss += output[2]
 
-                # # For CyclicalLR
-                # self.scheduler.step()
+            #     # # For CyclicalLR
+            # self.scheduler_high_level.step()
 
             # logger.info(f"train_high_level_action_loss: {np.mean(high_level_losses)}")
             # logger.info(f"train_low_level_action_loss: {np.mean(low_level_action_losses)}")

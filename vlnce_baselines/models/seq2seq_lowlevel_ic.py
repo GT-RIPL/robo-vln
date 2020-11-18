@@ -100,9 +100,6 @@ class Seq2Seq_LowLevel(nn.Module):
         self.stop_linear = nn.Linear(self.model_config.STATE_ENCODER.hidden_size, 1)
         self._init_layers()
 
-        self.train()
-
-
     @property
     def output_size(self):
         return self.model_config.STATE_ENCODER.hidden_size
@@ -119,7 +116,7 @@ class Seq2Seq_LowLevel(nn.Module):
         nn.init.kaiming_normal_(self.progress_monitor.weight, nonlinearity="tanh")
         nn.init.constant_(self.progress_monitor.bias, 0)
 
-    def forward_vnl(self, observations, discrete_actions):
+    def forward_vnl(self, observations):
         depth_embedding = self.depth_encoder(observations)
         rgb_embedding = self.rgb_encoder(observations)
         if self.model_config.ablate_instruction:
@@ -133,12 +130,11 @@ class Seq2Seq_LowLevel(nn.Module):
         # discrete_actions = (discrete_actions-1).masked_fill_(discrete_action_mask, 4)
 
         # sub_tasks_embedding = self.sub_task_embedding(discrete_actions.view(-1))
-        sub_tasks_embedding = self.sub_task_embedding(discrete_actions)
-        x = torch.cat([depth_embedding, rgb_embedding, sub_tasks_embedding], dim=1)
+        x = torch.cat([depth_embedding, rgb_embedding], dim=1)
         del depth_embedding, rgb_embedding
         return x
 
-    def forward(self, x, progress, rnn_hidden_states, prev_actions, masks, high_level_out):
+    def forward(self, x, discrete_actions, progress, rnn_hidden_states, prev_actions, masks, high_level_out):
         r"""
         instruction_embedding: [batch_size x INSTRUCTION_ENCODER.output_size]
         depth_embedding: [batch_size x DEPTH_ENCODER.output_size]
@@ -166,6 +162,8 @@ class Seq2Seq_LowLevel(nn.Module):
         # sub_tasks_embedding = self.sub_task_embedding(discrete_actions)
         # x = torch.cat([depth_embedding, rgb_embedding, sub_tasks_embedding], dim=1)
         # del depth_embedding, rgb_embedding
+        sub_tasks_embedding = self.sub_task_embedding(discrete_actions)
+        x = torch.cat([x, sub_tasks_embedding], dim=1)
         masks = masks[:,0]
 
         x, rnn_hidden_states = self.state_encoder(x, rnn_hidden_states, masks)
@@ -183,7 +181,7 @@ class Seq2Seq_LowLevel(nn.Module):
 
         detached_state_low = x.clone().detach()
 
-        inter_module_out = self.inter_module_attn(x.unsqueeze(0), high_level_out, None, None)
+        inter_module_out = self.inter_module_attn(high_level_out, x.unsqueeze(0), None, None)
 
         x = self.fc(torch.cat((x, inter_module_out.squeeze(0)), 1))
 
