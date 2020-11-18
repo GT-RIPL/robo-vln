@@ -12,12 +12,44 @@ from vlnce_baselines.common.continuous_path_follower import (
     track_waypoint
     
 )
+import shutil
+import os
 import random
 from fastdtw import fastdtw
 import habitat_sim
 import gzip
 from vlnce_baselines.common.env_utils import construct_env
 import wandb
+from habitat.utils.visualizations import maps
+
+from habitat.utils.visualizations.utils import (
+    append_text_to_image,
+    images_to_video,
+)
+
+def draw_top_down_map(info, output_size):
+    return maps.colorize_draw_agent_and_fit_to_height(
+        info["top_down_map"], output_size
+    )
+
+from habitat.utils.visualizations.utils import observations_to_image
+
+def save_map(observations, info, images):
+
+    im = observations_to_image(observations,info )
+    # im = observations["rgb"]
+    top_down_map = draw_top_down_map(
+        info, im.shape[0]
+    )
+
+    # depth_obs = observations['depth'].squeeze(2)
+    # depth_img = Image.fromarray((depth_obs / 10 * 255).astype(np.uint8), mode="RGB")
+    # output_im = np.concatenate((im, top_down_map), axis=1)
+    output_im = im
+    output_im = append_text_to_image(
+        output_im, observations["instruction"]["text"]
+    )
+    images.append(output_im)
 
 
 def euclidean_distance(position_a, position_b):
@@ -62,18 +94,30 @@ def evaluate_agent(config: Config):
     vel_control.lin_vel_is_local = True
     vel_control.controlling_ang_vel = True
     vel_control.ang_vel_is_local = True
+    images = []
+    IMAGE_DIR = os.path.join("examples", "images")
+    if not os.path.exists(IMAGE_DIR):
+        os.makedirs(IMAGE_DIR)
 
     while (len(stats_episodes) < config.EVAL.EPISODE_COUNT):
         current_episode = env.habitat_env.current_episode
         actions = agent.act()
         vel_control.linear_velocity = np.array([0, 0, -actions[0]])
         vel_control.angular_velocity = np.array([0, actions[1], 0])
-        _, _, done, info = env.step(vel_control)
+        observations, _, done, info = env.step(vel_control)
         episode_over, success = done
         episode_success = success and (actions[0]<0.25)
         is_done = episode_over or episode_success 
         steps+=1
         locations.append(env.habitat_env._sim.get_agent_state().position.tolist())
+        save_map(observations, info, images)
+
+        dirname = os.path.join(
+            IMAGE_DIR, "icra_video", "%02d" % env.habitat_env.current_episode.episode_id
+        )
+        if os.path.exists(dirname):
+            shutil.rmtree(dirname)
+        os.makedirs(dirname)
 
         if is_done or steps==config.TASK_CONFIG.ENVIRONMENT.MAX_EPISODE_STEPS:
             gt_locations = gt_json[str(current_episode.episode_id)]["locations"]
@@ -88,12 +132,14 @@ def evaluate_agent(config: Config):
             stats_episodes[current_episode.episode_id] = info
             stats_episodes[current_episode.episode_id]['ndtw'] = nDTW
             print("len stats episodes",len(stats_episodes))
-            
             print("Current episode ID:", current_episode.episode_id)
             print("Episode Completed:", ep_count)
             print(" Episode done---------------------------------------------")
             obs = env.reset()
             print(stats_episodes[current_episode.episode_id])
+            time_step = 1.0/30
+            images_to_video(images, dirname, str(current_episode.episode_id), fps = int (1.0/time_step))
+            images = []
 
     env.close()
 

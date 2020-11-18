@@ -3,9 +3,9 @@ SIMULATOR_GPU_ID: [0]
 TORCH_GPU_ID: 0
 NUM_PROCESSES: 1
 EVAL:
-    SPLIT: val_seen
+    SPLIT: val_unseen
     # any num greater than the actual episode count evals every episode
-    EPISODE_COUNT: 570
+    EPISODE_COUNT: 15
     EVAL_NONLEARNING: True
     NONLEARNING:
         # RandomAgent or HandcraftedAgent
