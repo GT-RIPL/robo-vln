@@ -365,6 +365,9 @@ class RoboDaggerTrainer(BaseRLTrainer):
             self.optimizer_low_level = torch.optim.Adam(
                 self.actor_critic.low_level.parameters(), lr=self.config.DAGGER.LR, weight_decay=self.config.MODEL.TRANSFORMER.weight_decay
             )
+            self.scheduler_high_level = torch.optim.lr_scheduler.CyclicLR(self.optimizer_high_level, base_lr=2e-6, max_lr=1e-4, step_size_up=1000,step_size_down=30000, cycle_momentum=False)
+            self.scheduler_low_level = torch.optim.lr_scheduler.CyclicLR(self.optimizer_high_level, base_lr=2e-6, max_lr=1e-4, step_size_up=1000,step_size_down=30000, cycle_momentum=False)
+
         else:
             self.high_level = Seq2Seq_HighLevel(
                     observation_space=self.envs.observation_space,
@@ -749,6 +752,21 @@ class RoboDaggerTrainer(BaseRLTrainer):
                 k: v.to(device=self.device2, non_blocking=True)
                 for k, v in observations.items()
             }
+
+            discrete_actions = observations['vln_oracle_action_sensor']
+            discrete_action_mask = discrete_actions ==0
+            discrete_actions = (discrete_actions-1).masked_fill_(discrete_action_mask, 4)
+            
+            # batch = (observations,
+            #         low_recurrent_hidden_states,
+            #         prev_actions.to(
+            #             device=self.device2, non_blocking=True
+            #         ),
+            #         not_done_masks.to(
+            #             device=self.device2, non_blocking=True
+            #         ),
+            #         observations['vln_oracle_action_sensor']-1) 
+
             batch = (observations,
                     low_recurrent_hidden_states,
                     prev_actions.to(
@@ -757,7 +775,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
                     not_done_masks.to(
                         device=self.device2, non_blocking=True
                     ),
-                    observations['vln_oracle_action_sensor']-1) 
+                    discrete_actions.view(-1)) 
 
             del observations, prev_actions, not_done_masks
             oracle_stop = oracle_stop.to(self.device2)
@@ -940,7 +958,8 @@ class RoboDaggerTrainer(BaseRLTrainer):
             # writer.add_scalar(f"Train Low Level Stop Loss", np.mean(low_level_stop_losses), train_steps)
             # writer.add_scalar(f"Train Low_level Total Loss", np.mean(low_level_total_losses), train_steps)
             #train_steps += 1
-            # self.scheduler_high_level.step()
+            self.scheduler_high_level.step()
+            self.scheduler_low_level.step()
 
         self.save_checkpoint(
             f"ckpt.{self.config.DAGGER.EPOCHS + epoch}.pth"

@@ -181,12 +181,11 @@ class Seq2Seq_HighLevel(nn.Module):
                 self.model_config.PROGRESS_MONITOR.alpha,
             )
         detached_state_high = x.clone().detach()
-        if low_level_out is None:
-            inter_module_out = torch.zeros(1,1, self.model_config.STATE_ENCODER.hidden_size).to(x.device)
-        else:
-            inter_module_out = self.inter_module_attn(low_level_out, x.unsqueeze(0), None, None)
-        
-        x = self.fc(torch.cat((x, inter_module_out.squeeze(0)), 1))
+        # if low_level_out is None:
+        #     inter_module_out = torch.zeros(1,1, self.model_config.STATE_ENCODER.hidden_size).to(x.device)
+        # else:
+        #     inter_module_out = self.inter_module_attn(low_level_out, x.unsqueeze(0), None, None)
+        # x = self.fc(torch.cat((x, inter_module_out.squeeze(0)), 1))
 
         x = self.linear(x)
         # print("rest time",time.time() - rest_time)

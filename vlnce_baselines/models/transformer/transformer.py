@@ -84,6 +84,7 @@ class PositionWiseFeedForward(nn.Module):
         pwff = self.dropout(pwff)
         out = self.layer_norm(input + pwff)
         return out
+        
 
 class ScaledDotProductAttention(nn.Module):
     """
@@ -136,7 +137,14 @@ class ScaledDotProductAttention(nn.Module):
         k = self.fc_k(keys).view(b_s, nk, self.h, self.d_k).permute(0, 2, 3, 1)  # (b_s, h, d_k, nk)
         v = self.fc_v(values).view(b_s, nk, self.h, self.d_v).permute(0, 2, 1, 3)  # (b_s, h, nk, d_v)
 
+        # print("q",q.shape)
+        # print("k",k.shape)
+        # print("v",v.shape)
+
         att = torch.matmul(q, k) / np.sqrt(self.d_k)  # (b_s, h, nq, nk)
+
+        # print("att",att.shape)
+        # print("actual attention",att)
         if attention_weights is not None:
             # TODO a bit different from Herdade et al. 2019
             att = att * attention_weights
@@ -167,6 +175,8 @@ class MultiHeadAttention(nn.Module):
         att = self.attention(queries, keys, values, attention_mask, attention_weights)
         att = self.dropout(att)
         return self.layer_norm(queries + att)
+        # # return queries + att
+        # return att
 
 class EncoderLayer(nn.Module):
     def __init__(self, d_model=512, d_k=64, d_v=64, h=8, d_ff=2048, dropout=.1):
@@ -202,11 +212,11 @@ class TransformerLanguageEncoder(BaseEncoder):
         super(TransformerLanguageEncoder, self).__init__(config)
         self.fc = nn.Linear(config.d_in, self.d_model, bias=True)
 
-    def forward(self, input, attention_mask, attention_weights=None, device=None):
+    def forward(self, input, attention_mask, attention_weights=None):
         # input (b_s, seq_len, d_in)
-        data, mask = input
+        # data, mask = input
 
-        out = F.relu(self.fc(data))
+        out = F.relu(self.fc(input))
         out = self.dropout(out)
         out = self.layer_norm(out)
 
@@ -260,6 +270,7 @@ class InterModuleAttnLayer(nn.Module):
         enc_att = self.enc_att(input_1, input_2, input_2, mask_enc_att)
         ff = self.pwff(enc_att)
         return ff
+        # return enc_att
 
 class InterModuleAttnDecoder(nn.Module):
     def __init__(self, config):
@@ -287,6 +298,38 @@ class InterModuleAttnDecoder(nn.Module):
             out = l(out, input_2, self_att_mask, enc_att_mask)
         return out
 
+
+class Visual_Ling_Attn(nn.Module):
+    def __init__(self, config):
+        super(Visual_Ling_Attn, self).__init__()
+        self.d_model = config.d_model
+        self.d_att = int(self.d_model/config.h)
+        self.layers = nn.ModuleList([InterModuleAttnLayer(self.d_model, self.d_att, self.d_att, config.h, config.d_ff, config.dropout) for _ in range(config.N)])
+        self.vis_fc = nn.Linear(config.vis_in_features, self.d_model)
+        self.ins_fc = nn.Linear(config.ins_in_features, self.d_model)
+        self.dropout = nn.Dropout(p=config.dropout)
+        self.layer_norm = nn.LayerNorm(self.d_model)
+
+    def forward(self, input, input_2, self_att_mask, enc_att_mask):
+        out = F.relu(self.vis_fc(input_2))
+        out = self.dropout(out)
+        out = self.layer_norm(out)
+
+        input = F.relu(self.ins_fc(input))
+        input = self.dropout(input)
+        input = self.layer_norm(input)
+        
+        dev = input.get_device()
+        pe = sinusoid_encoding_table(input.shape[1], input.shape[2])
+        pe = pe.expand(input.shape[0], pe.shape[0], pe.shape[1]).to(dev)
+        input = input + pe
+
+        ##TODO: Try making Image encoder same as DETR Image encoder: https://github.com/facebookresearch/detr/blob/ae03a2d6e52a9ec1b67f85437d0a275c5abbe9ac/models/transformer.py#L149
+        ## Add position embed to only query and key vector and not value
+
+        for l in self.layers:
+            out = l(input, out, self_att_mask, enc_att_mask)
+        return out
 
 class ImageCrossModalEncoder(nn.Module):
     def __init__(self, config):

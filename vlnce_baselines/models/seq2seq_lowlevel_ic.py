@@ -179,7 +179,8 @@ class Seq2Seq_LowLevel(nn.Module):
                 self.model_config.PROGRESS_MONITOR.alpha,
             )
 
-        detached_state_low = x.clone().detach()
+        # detached_state_low = x.clone().detach()
+        detached_state_low = None
 
         inter_module_out = self.inter_module_attn(high_level_out, x.unsqueeze(0), None, None)
 
