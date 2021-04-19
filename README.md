@@ -13,52 +13,62 @@ International Conference on Robotics and Automation (ICRA), 2021<br>
 <img src="demo/ACMI_final.svg" height="260px">
 </p>
 
-## Installation - Dependencies
+## Installation 
+
+Clone the current repository and required submodules:
+
+```bash
+git clone https://github.com/zubair-irshad/robo-vln
+cd robo-vln
+  
+export robovln_rootdir=$PWD
+    
+git submodule init 
+git submodule update
+```
 
 ### Habitat and Other Dependencies
 
-SASRA makes extensive use of the Habitat Simulator and API developed by FAIR. You will first need to install both [Habitat-Sim](https://github.com/facebookresearch/habitat-sim) and [Habitat-API](https://github.com/facebookresearch/habitat-api/tree/v0.1.4). If you are using conda, Habitat-Sim can easily be installed with:
-```bash
-conda install -c aihabitat -c conda-forge habitat-sim headless
-```
-Otherwise, follow the Habitat-Sim [installation instructions](https://github.com/facebookresearch/habitat-sim#installation). Then install Habitat-API version `0.1.4`:
+We use modified versions of [Habitat-Sim](https://github.com/facebookresearch/habitat-sim) and [Habitat-API](https://github.com/facebookresearch/habitat-lab) to support continuous control/action-spaces in Habitat Simulator. The details regarding continuous action spaces and converting discrete VLN dataset into continuous control formulation can be found in our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf). The specific commits of our modified [Habitat-Sim](https://github.com/facebookresearch/habitat-sim) and [Habitat-API](https://github.com/facebookresearch/habitat-lab) versions are mentioned below.
 
-```bash
-git clone --branch v0.1.4 git@github.com:facebookresearch/habitat-api.git
-cd habitat-api
-# installs both habitat and habitat_baselines
+```bash	
+# installs both habitat-api and habitat_baselines
+cd $robovln_rootdir/environments/habitat/habitat-api
 python -m pip install -r requirements.txt
 python -m pip install -r habitat_baselines/rl/requirements.txt
 python -m pip install -r habitat_baselines/rl/ddppo/requirements.txt
 python setup.py develop --all
+	
+# Install habitat-sim
+cd $robovln_rootdir/environments/habitat/habitat-sim
+python setup.py install --headless --with-cuda
 ```
-We recommend downloading the test scenes and running the example script as described [here](https://github.com/facebookresearch/habitat-api/blob/v0.1.4/README.md#installation) to ensure the installation of Habitat-Sim and Habitat-API was successful. Now you can clone this repository and install the rest of the dependencies:
+
+Install the rest of the `robo-vln` dependencies as follows:
 ```bash
-git clone git@github.com:jacobkrantz/VLN-CE.git
-cd VLN-CE
+cd $robovln_rootdir
 python -m pip install -r requirements.txt
 ```
 
 ### Data
 
-Like Habitat-API, we expect a `data` folder (or symlink) with a particular structure in the top-level directory of this project.
+Similar to Habitat-API, we expect a `data` folder (or symlink) with a particular structure in the top-level directory of this project.
 
 #### Matterport3D
 
-We train and evaluate our agents on Matterport3D (MP3D) scene reconstructions. The official Matterport3D download script (`download_mp.py`) can be accessed by following the "Dataset Download" instructions on their [project webpage](https://niessner.github.io/Matterport/). The scene data needed to run VLN-CE can then be downloaded this way:
+We utilize Matterport3D (MP3D) photo-realistic scene reconstructions to train and evaluate our agent. A total of 90 Matterport3D scenes are used for `robo-vln`.Here is the official Matterport3D Dataset download link and associated instructions [project webpage](https://niessner.github.io/Matterport/). To download the scenes needed for `robo-vln`, run the following commands:
 
 ```bash
 # requires running with python 2.7
 python download_mp.py --task habitat -o data/scene_datasets/mp3d/
 ```
-
-Extract this data to `data/scene_datasets/mp3d` such that it has the form `data/scene_datasets/mp3d/{scene}/{scene}.glb`. There should be 90 total scenes.
+Extract this data to `data/scene_datasets/mp3d` such that it has the form `data/scene_datasets/mp3d/{scene}/{scene}.glb`. 
 
 #### Dataset
 
-The Robo-VLN dataset is a continuous control formualtion of the VLN-CE dataset by [Krantz et al](https://arxiv.org/pdf/2004.02857.pdf) ported over from Room-to-Room (R2R) dataset created by [Anderson et al](http://openaccess.thecvf.com/content_cvpr_2018/papers/Anderson_Vision-and-Language_Navigation_Interpreting_CVPR_2018_paper.pdf). The details regarding converting discrete dataset into continuous control formulation can be found in our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf). 
+The Robo-VLN dataset is a continuous control formualtion of the VLN-CE dataset by [Krantz et al](https://arxiv.org/pdf/2004.02857.pdf) ported over from Room-to-Room (R2R) dataset created by [Anderson et al](http://openaccess.thecvf.com/content_cvpr_2018/papers/Anderson_Vision-and-Language_Navigation_Interpreting_CVPR_2018_paper.pdf). The details regarding converting discrete VLN dataset into continuous control formulation can be found in our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf). 
 
-| Dataset 	| Download path               	| Size  	|
+| Dataset 	| Path to extract              	| Size  	|
 |--------------	|----------------------------	|-------	|
 | [robo_vln_v1.zip](https://www.dropbox.com/s/1h1rfx4bssz5qwy/robo_vln_v1.zip?dl=0) 	| `data/datasets/robo_vln_v1`          	| 76.9 MB 	|
 
@@ -70,7 +80,7 @@ The dataset `robo_vln_v1` contains the `train`, `val_seen`, and `val_unseen` spl
 * val_seen: 570 episodes
 * val_unseen: 1224 episodes
 
-* Format of `{split}.json.gz`
+Format of `{split}.json.gz`
 
 ```
 {
@@ -146,7 +156,6 @@ The dataset `robo_vln_v1` contains the `train`, `val_seen`, and `val_unseen` spl
     ...
 }
 ```
-
 #### Depth Encoder Weights
 Similar to [VLN-CE](https://arxiv.org/pdf/2004.02857.pdf), our learning-based models utilizes a depth encoder pretained on a large-scale point-goal navigation task i.e. [DDPPO](https://arxiv.org/abs/1911.00357). We utilize depth pretraining by using the DDPPO features from the ResNet50 from the original paper. The pretrained network can be downloaded [here](https://drive.google.com/open?id=1ueXuIqP2HZ0oxhpDytpc3hpciXSd8H16). Extract the contents of `ddppo-models.zip` to `data/ddppo-models/{model}.pth`.
 ```bash
@@ -155,7 +164,7 @@ gdown https://drive.google.com/uc?id=1ueXuIqP2HZ0oxhpDytpc3hpciXSd8H16
 ```
 
 ## Usage
-The `run.py` script is how training and evaluation is done for all model configurations. Specify a configuration file and a run type (either `train` or `eval`) as such:
+Similar to VLN-CE The `run.py` script is how training and evaluation is done for all model configurations. Specify a configuration file and a run type (either `train` or `eval`) as such:
 ```bash
 python run.py --exp-config path/to/experiment_config.yaml --run-type {train | eval}
 ```
@@ -166,33 +175,6 @@ python run.py --exp-config vlnce_baselines/config/nonlearning.yaml --run-type ev
 ```
 
 For lists of modifiable configuration options, see the default [task config](habitat_extensions/config/default.py) and [experiment config](vlnce_baselines/config/default.py) files.
-
-### Imitation Learning
-For both teacher forcing and DAgger training, experience is collected in simulation and saved to disc for future network updates. This includes saving (at each time step along a trajectory) RGB and Depth encodings, ground truth actions, and instruction tokens. The `DAGGER` config entry allows for specifying which training type is used. A teacher forcing example:
-
-```yaml
-DAGGER:
-  LR: 2.5e-4  # learning rate
-  ITERATIONS: 1  # set to 1 for teacher forcing
-  EPOCHS: 15
-  UPDATE_SIZE: 10819  # total number of training episodes
-  BATCH_SIZE: 5  # number of complete episodes in a batch
-  P: 1.0  # Must be 1.0 for teacher forcing
-  USE_IW: True  # Inflection weighting
-```
-
-A DAgger example:
-
-```yaml
-DAGGER:
-  LR: 2.5e-4  # learning rate
-  ITERATIONS: 15  # number of dataset aggregation rounds
-  EPOCHS: 4  # number of network update rounds per iteration
-  UPDATE_SIZE: 5000  # total number of training episodes
-  BATCH_SIZE: 5  # number of complete episodes in a batch
-  P: 0.75  # DAgger: 0.0 < P < 1.0
-  USE_IW: True  # Inflection weighting
-```
 
 Configuration options exist for loading an already-trained checkpoint for fine-tuning (`LOAD_FROM_CKPT`, `CKPT_TO_LOAD`) as well as for reusing a database of collected features (`PRELOAD_LMDB_FEATURES`, `LMDB_FEATURES_DIR`). Note that reusing collected features for training only makes sense for regular teacher forcing training.
 
