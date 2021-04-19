@@ -1,61 +1,19 @@
-# SASRA: Semantically-aware Spatio-temporal Reasoning Agent for Vision and Language Navigation
+# Hierarchical Cross-Modal Agent for Vision-and-Language Navigation
 <img src="demo/Pytorch_logo.png" width="10%"> [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
 
-This repository is the pytorch implementation of end to end interpretable trasnformer like architecture for Vision and Language Navigation:
-<img align="right" src="demo/einstein_scroll.png" width="5%">
-<img align="right" src="demo/SRI_Logo.png" width="6%">
+This repository is the pytorch implementation of our paper:
+
+**Hierarchical Cross-Modal Agent for Vision-and-Language Navigation**<br>
+[__***Muhammad Zubair Irshad***__](https://zubairirshad.com), [Chih-Yao Ma](https://chihyaoma.github.io/), [Zsolt Kira](https://www.cc.gatech.edu/~zk15/) <br>
+International Conference on Robotics and Automation (ICRA), 2021<br>
+
+[[Project Page](https://zubair-irshad.github.io/projects/robo-vln.html)] [[arXiv](https://arxiv.org/abs/1901.03035)] [[GitHub](https://github.com/chihyaoma/selfmonitoring-agent)] 
 
 <p align="center">
-  <img width="800" height="450" src="demo/hybrid_arch.png" alt="Hybrid Transformer-RNN Model for VLN">
+<img src="demo/ACMI_final.svg" height="260px">
 </p>
 
-
-### Running different configurations:
-
-#### Some general Comments:
-
-- All configurations run on a single GPU except Hybrid CMA which utlises Model Parallel ( To run model parallel, add the following line of code in `SASRA/vlnce_baselines/models/policy.py` line 27 in `BaseTransformerPolicy`:
-`self.action_distribution = self.action_distribution.cuda(0)`. Uncomment this line if you are not running Model Parallel ( True for all configurations except hybrid_cma.yaml)
-)
-
-- Make sure to only set `PRELOAD_LMDB_FEATURES=FALSE` when creating a new dataset for any configurations. If you are using existing datasets available under `VLNCE-data/data/trajectory_dir` (The path is already set for existing datasets in the specific configurations), make sure to set `PRELOAD_LMDB_FEATURES=TRUE`. If you do not explicitly set this to `TRUE`, the already collected data would be corrupted
-
-- While running configurations which support `dagger_trainer.py` (Please see below all configurations running on dagger_trainer.py), you do not need to change model name inside dagger trainer. If you are running configurations running on `transformer_trainer.py`, you need to explictly set which model you want to use. An example is detailed here: 
-
-1. Import the Model you want to use:
-
-from vlnce_baselines.models.transformer_semantics_policy import TransformerSemPolicy
-
-2. Explictly set the Model in Line 301 in transformer_trainer.py as follows: 
-
-            self.actor_critic = TransformerSemPolicyMP(
-                observation_space=self.envs.observation_spaces[0],
-                action_space=self.envs.action_spaces[0],
-                model_config=config,
-                batch_size=self.config.DAGGER.BATCH_SIZE,
-                gpus = [0,1,2]
-            )
-
-3. For `dagger trainer.py`, double check to see if you using the correct policy by looking at lines 284-316  
-
-
-- Running Eval Scripts: For conigurations using `transformer_trainer.py`, please make sure to set `NUM_PROCESSES = 1` for correct evaluation. For all conigurations using `dagger_trainer.py` except `hybrid_cma.yaml`, you can set `NUM_PROCESSES > 1`. For `hybrid_cma.yaml`, since the training script uses Model Parallel, create a new hybrid_cma_eval polocy by copying `hybrid_cma_mp.py` in another file and disabling all model parallel gpu shifts. Use this policy in `dagger_trainer.py` while evaluating `hybrid_cma` results with `NUM_PROCESSES = 1`
-
-## Recently experimented Models (These are in addition to the ones available in the VLN-CE codebase)
-
-
-| Model                 | Trainer used           | Model File                      | Model Name              | Config                                                                                        |
-|-----------------------|------------------------|---------------------------------|-------------------------|-----------------------------------------------------------------------------------------------|
-| Seq2Seq               | dagger_trainer.py      | seq2seq_policy.py               | Seq2SeqPolicy           | [seq2seq.yaml](vlnce_baselines/config/paper_configs/seq2seq.yaml)                             |
-| Seq2Seq_SEM_ATTN      | dagger_trainer.py      | seq2seq_sem_attn.py             | Seq2Seq_Sem_Attn_Polic  | [seq2seq_pm.yaml](vlnce_baselines/config/paper_configs/seq2seq_sem_attn.yaml)                 |
-| TRANSFORMER           | dagger_trainer.py      | transformer_policy.py           | TransformerPolicy       | [seq2seq_text_attn.yaml](vlnce_baselines/config/paper_configs/seq2seq_text_attn.yaml)         |
-| TRANSFORMER_SEMANTICS | transformer_trainer.py | transformer_semantics_policy.py | TransformerSemPolicy    | [transformer_semantics.yaml](vlnce_baselines/config/paper_configs/transformer_semantics.yaml) |
-| HYBRID_CMA            | transformer_trainer.py | hybrid_cma_mp.py                | TransformerHybridPolicy | [hybrid_cma.yaml](vlnce_baselines/config/paper_configs/hybrid_cma.yaml)                       |
-
-|                                                                                                        
-
-
-## Setup
+## Installation - Dependencies
 
 ### Habitat and Other Dependencies
 
@@ -97,31 +55,100 @@ python download_mp.py --task habitat -o data/scene_datasets/mp3d/
 Extract this data to `data/scene_datasets/mp3d` such that it has the form `data/scene_datasets/mp3d/{scene}/{scene}.glb`. There should be 90 total scenes.
 
 #### Dataset
-The R2R_VLNCE dataset is a port of the Room-to-Room (R2R) dataset created by [Anderson et al](http://openaccess.thecvf.com/content_cvpr_2018/papers/Anderson_Vision-and-Language_Navigation_Interpreting_CVPR_2018_paper.pdf) for use with the [Matterport3DSimulator](https://github.com/peteanderson80/Matterport3DSimulator) (MP3D-Sim). For details on the porting process from MP3D-Sim to the continuous reconstructions used in Habitat, please see our [paper](https://arxiv.org/abs/2004.02857). We provide two versions of the dataset, `R2R_VLNCE_v1` and `R2R_VLNCE_v1_preprocessed`. `R2R_VLNCE_v1` contains the `train`, `val_seen`, and `val_unseen` splits. `R2R_VLNCE_v1_preprocessed` runs with our models out of the box. It includes instruction tokens mapped to GloVe embeddings, ground truth trajectories, and a data augmentation split (`envdrop`) that is ported from [R2R-EnvDrop](https://github.com/airsplay/R2R-EnvDrop). For more details on the dataset contents and format, see our [project page](https://jacobkrantz.github.io/vlnce/data).
 
-| Dataset 	| Extract path               	| Size  	|
+The Robo-VLN dataset is a continuous control formualtion of the VLN-CE dataset by [Krantz et al](https://arxiv.org/pdf/2004.02857.pdf) ported over from Room-to-Room (R2R) dataset created by [Anderson et al](http://openaccess.thecvf.com/content_cvpr_2018/papers/Anderson_Vision-and-Language_Navigation_Interpreting_CVPR_2018_paper.pdf). The details regarding converting discrete dataset into continuous control formulation can be found in our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf). 
+
+| Dataset 	| Download path               	| Size  	|
 |--------------	|----------------------------	|-------	|
-| [R2R_VLNCE_v1.zip](https://drive.google.com/file/d/1k9LLJGeDGLIO2wxtWhzjGHhvQ2t2aJBQ/view) 	| `data/datasets/R2R_VLNCE_v1`          	| 3 MB 	|
-| [R2R_VLNCE_v1_preprocessed.zip](https://drive.google.com/file/d/1IDM4eEMTJDKN6-mGTSmqSkv620hCd_TX/view)  	| `data/datasets/R2R_VLNCE_v1_preprocessed` 	| 344 MB 	|
+| [robo_vln_v1.zip](https://www.dropbox.com/s/1h1rfx4bssz5qwy/robo_vln_v1.zip?dl=0) 	| `data/datasets/robo_vln_v1`          	| 76.9 MB 	|
 
-Downloading the dataset:
-```bash
-python -m pip install gdown
-cd data/datasets
+#### Robo-VLN Dataset
 
-# R2R_VLNCE_v1
-gdown https://drive.google.com/uc?id=1k9LLJGeDGLIO2wxtWhzjGHhvQ2t2aJBQ
-unzip R2R_VLNCE_v1.zip
-rm R2R_VLNCE_v1.zip
+The dataset `robo_vln_v1` contains the `train`, `val_seen`, and `val_unseen` splits. 
 
-# R2R_VLNCE_v1_preprocessed
-gdown https://drive.google.com/uc?id=1IDM4eEMTJDKN6-mGTSmqSkv620hCd_TX
-unzip R2R_VLNCE_v1_preprocessed.zip
-rm R2R_VLNCE_v1_preprocessed.zip
+* train: 7739 episodes
+* val_seen: 570 episodes
+* val_unseen: 1224 episodes
+
+* Format of `{split}.json.gz`
+
+```
+{
+    'episodes' = [
+        {
+            'episode_id': 4991,
+            'trajectory_id': 3279,
+            'scene_id': 'mp3d/JeFG25nYj2p/JeFG25nYj2p.glb',
+            'instruction': {
+                'instruction_text': 'Walk past the striped area rug...',
+                'instruction_tokens': [2384, 1589, 2202, 2118, 133, 1856, 9]
+            },
+            'start_position': [10.257800102233887, 0.09358400106430054, -2.379739999771118],
+            'start_rotation': [0, 0.3332950713608026, 0, 0.9428225683587541],
+            'goals': [
+                {
+                    'position': [3.360340118408203, 0.09358400106430054, 3.07817006111145], 
+                    'radius': 3.0
+                }
+            ],
+            'reference_path': [
+                [10.257800102233887, 0.09358400106430054, -2.379739999771118], 
+                [9.434900283813477, 0.09358400106430054, -1.3061100244522095]
+                ...
+                [3.360340118408203, 0.09358400106430054, 3.07817006111145],
+            ],
+            'info': {'geodesic_distance': 9.65537166595459},
+        },
+        ...
+    ],
+    'instruction_vocab': [
+        'word_list': [..., 'orchids', 'order', 'orient', ...],
+        'word2idx_dict': {
+            ...,
+            'orchids': 1505,
+            'order': 1506,
+            'orient': 1507,
+            ...
+        },
+        'itos': [..., 'orchids', 'order', 'orient', ...],
+        'stoi': {
+            ...,
+            'orchids': 1505,
+            'order': 1506,
+            'orient': 1507,
+            ...
+        },
+        'num_vocab': 2504,
+        'UNK_INDEX': 1,
+        'PAD_INDEX': 0,
+    ]
+}
+```
+* Format of `{split}_gt.json.gz`
+
+```
+{
+    '4991': {
+        'actions': [
+          ...
+          [-0.999969482421875, 1.0],
+          [-0.9999847412109375, 0.15731772780418396],
+          ...
+          ],
+        'forward_steps': 325,
+        'locations': [
+            [10.257800102233887, 0.09358400106430054, -2.379739999771118],
+            [10.257800102233887, 0.09358400106430054, -2.379739999771118],
+            ...
+            [-12.644463539123535, 0.1518409252166748, 4.2241311073303220]
+        ]
+    }
+    ...
+}
 ```
 
-#### Encoder Weights
-The learning-based models receive a depth observation at each time step. The depth encoder we use is a ResNet pretrained on a PointGoal navigation task using [DDPPO](https://arxiv.org/abs/1911.00357). In this work, we extract features from the ResNet50 trained on Gibson 2+ from the original paper, whose weights can be downloaded [here](https://drive.google.com/open?id=1ueXuIqP2HZ0oxhpDytpc3hpciXSd8H16). Extract the contents of `ddppo-models.zip` to `data/ddppo-models/{model}.pth`.
+#### Depth Encoder Weights
+Similar to [VLN-CE](https://arxiv.org/pdf/2004.02857.pdf), our learning-based models utilizes a depth encoder pretained on a large-scale point-goal navigation task i.e. [DDPPO](https://arxiv.org/abs/1911.00357). We utilize depth pretraining by using the DDPPO features from the ResNet50 from the original paper. The pretrained network can be downloaded [here](https://drive.google.com/open?id=1ueXuIqP2HZ0oxhpDytpc3hpciXSd8H16). Extract the contents of `ddppo-models.zip` to `data/ddppo-models/{model}.pth`.
 ```bash
 # ddppo-models.zip (672M)
 gdown https://drive.google.com/uc?id=1ueXuIqP2HZ0oxhpDytpc3hpciXSd8H16
