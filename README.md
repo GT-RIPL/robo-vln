@@ -10,7 +10,7 @@ International Conference on Robotics and Automation (ICRA), 2021<br>
 [[Project Page](https://zubair-irshad.github.io/projects/robo-vln.html)] [[arXiv](https://arxiv.org/abs/1901.03035)] [[GitHub](https://github.com/chihyaoma/selfmonitoring-agent)] 
 
 <p align="center">
-<img src="demo/ACMI_final.jpg" height="300px">
+<img src="demo/ACMI_final.jpg" height="260px">
 </p>
 
 ## Installation 
@@ -66,6 +66,10 @@ python download_mp.py --task habitat -o data/scene_datasets/mp3d/
 Extract this data to `data/scene_datasets/mp3d` such that it has the form `data/scene_datasets/mp3d/{scene}/{scene}.glb`. 
 
 #### Dataset
+
+<p align="center">
+<img src="demo/GIF.gif" height="300px">
+</p>
 
 The Robo-VLN dataset is a continuous control formualtion of the VLN-CE dataset by [Krantz et al](https://arxiv.org/pdf/2004.02857.pdf) ported over from Room-to-Room (R2R) dataset created by [Anderson et al](http://openaccess.thecvf.com/content_cvpr_2018/papers/Anderson_Vision-and-Language_Navigation_Interpreting_CVPR_2018_paper.pdf). The details regarding converting discrete VLN dataset into continuous control formulation can be found in our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf). 
 
