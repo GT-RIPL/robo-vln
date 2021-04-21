@@ -33,7 +33,7 @@ We use modified versions of [Habitat-Sim](https://github.com/facebookresearch/ha
 
 ```bash	
 # installs both habitat-api and habitat_baselines
-cd $robovln_rootdir/environments/habitat/habitat-api
+cd $robovln_rootdir/environments/habitat-lab
 python -m pip install -r requirements.txt
 python -m pip install -r habitat_baselines/rl/requirements.txt
 python -m pip install -r habitat_baselines/rl/ddppo/requirements.txt
@@ -56,7 +56,7 @@ Similar to Habitat-API, we expect a `data` folder (or symlink) with a particular
 
 #### Matterport3D
 
-We utilize Matterport3D (MP3D) photo-realistic scene reconstructions to train and evaluate our agent. A total of 90 Matterport3D scenes are used for `robo-vln`.Here is the official Matterport3D Dataset download link and associated instructions [project webpage](https://niessner.github.io/Matterport/). To download the scenes needed for `robo-vln`, run the following commands:
+We utilize Matterport3D (MP3D) photo-realistic scene reconstructions to train and evaluate our agent. A total of 90 Matterport3D scenes are used for `robo-vln`. Here is the official Matterport3D Dataset download link and associated instructions: [project webpage](https://niessner.github.io/Matterport/). To download the scenes needed for `robo-vln`, run the following commands:
 
 ```bash
 # requires running with python 2.7
