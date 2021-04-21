@@ -29,6 +29,13 @@ git submodule update
 
 ### Habitat and Other Dependencies
 
+Install `robo-vln` dependencies as follows:
+```bash
+conda create -n habitat python=3.7 cmake=3.14.0
+cd $robovln_rootdir
+python -m pip install -r requirements.txt
+```
+
 We use modified versions of [Habitat-Sim](https://github.com/facebookresearch/habitat-sim) and [Habitat-API](https://github.com/facebookresearch/habitat-lab) to support continuous control/action-spaces in Habitat Simulator. The details regarding continuous action spaces and converting discrete VLN dataset into continuous control formulation can be found in our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf). The specific commits of our modified [Habitat-Sim](https://github.com/facebookresearch/habitat-sim) and [Habitat-API](https://github.com/facebookresearch/habitat-lab) versions are mentioned below.
 
 ```bash	
@@ -40,14 +47,8 @@ python -m pip install -r habitat_baselines/rl/ddppo/requirements.txt
 python setup.py develop --all
 	
 # Install habitat-sim
-cd $robovln_rootdir/environments/habitat/habitat-sim
+cd $robovln_rootdir/environments/habitat-sim
 python setup.py install --headless --with-cuda
-```
-
-Install the rest of the `robo-vln` dependencies as follows:
-```bash
-cd $robovln_rootdir
-python -m pip install -r requirements.txt
 ```
 
 ### Data
