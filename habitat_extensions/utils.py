@@ -41,12 +41,6 @@ def observations_to_image(observation: Dict, info: Dict) -> np.ndarray:
     assert len(egocentric_view) > 0, "Expected at least one visual sensor enabled."
     egocentric_view = np.concatenate(egocentric_view, axis=1)
 
-    # # draw collision
-    # if "collisions" in info and info["collisions"]["is_collision"]:
-    #     egocentric_view = draw_collision(egocentric_view)
-
-    # frame = egocentric_view
-
     if "top_down_map" in info:
         top_down_map = info["top_down_map"]["map"]
         top_down_map = maps.colorize_topdown_map(

@@ -13,4 +13,3 @@ dgl==0.4.0
 Pillow==6.1
 pynvml
 transformers
-pytorch-lightning

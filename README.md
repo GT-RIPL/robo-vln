@@ -1,16 +1,16 @@
-# Hierarchical Cross-Modal Agent for Vision-and-Language Navigation
+# Hierarchical Cross-Modal Agent for Robotics Vision-and-Language Navigation
 <img src="demo/Pytorch_logo.png" width="10%"> [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
 
 This repository is the pytorch implementation of our paper:
 
-**Hierarchical Cross-Modal Agent for Vision-and-Language Navigation**<br>
+**Hierarchical Cross-Modal Agent for Robotics Vision-and-Language Navigation**<br>
 [__***Muhammad Zubair Irshad***__](https://zubairirshad.com), [Chih-Yao Ma](https://chihyaoma.github.io/), [Zsolt Kira](https://www.cc.gatech.edu/~zk15/) <br>
 International Conference on Robotics and Automation (ICRA), 2021<br>
 
 [[Project Page](https://zubair-irshad.github.io/projects/robo-vln.html)] [[arXiv](https://arxiv.org/abs/1901.03035)] [[GitHub](https://github.com/chihyaoma/selfmonitoring-agent)] 
 
 <p align="center">
-<img src="demo/ACMI_final.svg" height="260px">
+<img src="demo/ACMI_final.jpg" height="260px">
 </p>
 
 ## Installation 
@@ -70,7 +70,7 @@ The Robo-VLN dataset is a continuous control formualtion of the VLN-CE dataset b
 
 | Dataset 	| Path to extract              	| Size  	|
 |--------------	|----------------------------	|-------	|
-| [robo_vln_v1.zip](https://www.dropbox.com/s/1h1rfx4bssz5qwy/robo_vln_v1.zip?dl=0) 	| `data/datasets/robo_vln_v1`          	| 76.9 MB 	|
+| [robo_vln_v1.zip](https://www.dropbox.com/s/1h1rfx4bssz5qwy/robo_vln_v1.zip?dl=1) 	| `data/datasets/robo_vln_v1`          	| 76.9 MB 	|
 
 #### Robo-VLN Dataset
 
@@ -163,20 +163,14 @@ Similar to [VLN-CE](https://arxiv.org/pdf/2004.02857.pdf), our learning-based mo
 gdown https://drive.google.com/uc?id=1ueXuIqP2HZ0oxhpDytpc3hpciXSd8H16
 ```
 
-## Usage
-Similar to VLN-CE The `run.py` script is how training and evaluation is done for all model configurations. Specify a configuration file and a run type (either `train` or `eval`) as such:
+## Training and reproducing results
+
+### 
+We use `run.py` script to train and evaluate all of our baseline models. Use `run.py` along with a configuration file and a run type (either `train` or `eval`) to train or evaluate:
 ```bash
-python run.py --exp-config path/to/experiment_config.yaml --run-type {train | eval}
+python run.py --exp-config path/to/config.yaml --run-type {train | eval}
 ```
-
-For example, a random agent can be evaluated on 10 val-seen episodes using this command:
-```bash
-python run.py --exp-config vlnce_baselines/config/nonlearning.yaml --run-type eval
-```
-
-For lists of modifiable configuration options, see the default [task config](habitat_extensions/config/default.py) and [experiment config](vlnce_baselines/config/default.py) files.
-
-Configuration options exist for loading an already-trained checkpoint for fine-tuning (`LOAD_FROM_CKPT`, `CKPT_TO_LOAD`) as well as for reusing a database of collected features (`PRELOAD_LMDB_FEATURES`, `LMDB_FEATURES_DIR`). Note that reusing collected features for training only makes sense for regular teacher forcing training.
+For lists of modifiable configuration options, see the default [task config](habitat_extensions/config/default.py) and [experiment config](robo_vln_baselines/config/default.py) files.
 
 ### Evaluating Models
 Evaluation of models can be done by running `python run.py --exp-config path/to/experiment_config.yaml --run-type eval`. The relevant config entries for evaluation are:
@@ -189,58 +183,56 @@ EVAL.EPISODE_COUNT  # how many episodes to evaluate
 ```
 If `EVAL.EPISODE_COUNT` is equal to or greater than the number of episodes in the evaluation dataset, all episodes will be evaluated. If `EVAL_CKPT_PATH_DIR` is a directory, one checkpoint will be evaluated at a time. If there are no more checkpoints to evaluate, the script will poll the directory every few seconds looking for a new one. Each config file listed in the next section is capable of both training and evaluating the model it is accompanied by.
 
-### Cuda
-Cuda will be used by default if it is available. If you have multiple GPUs, you can specify which card is used:
-```yaml
-SIMULATOR_GPU_ID: 0
-TORCH_GPU_ID: 0
-NUM_PROCESSES: 1
+
+### Off-line Data Buffer
+All our models require an off-line data buffer for training. To collect the continuous control dataset for both `train` and `val_seen` splits, run the following commands before training (Please note that it would take some time on a single GPU to store data. Please also make sure to dedicate around ~1.5 TB of hard-disk space for data collection):
+
+`Collect data buffer for train split:`
+```bash
+python run.py --exp-config robo_vln_baselines/config/paper_configs/robovln_data_train.yaml --run-type train
 ```
-Note that the simulator and torch code do not need to run on the same card. For faster training and evaluation, we recommend running with as many processes (parallel simulations) as will fit on a standard GPU.
+
+`Collect data buffer for val_seen split:`
+```bash
+python run.py --exp-config robo_vln_baselines/config/paper_configs/robovln_data_val.yaml --run-type train 
+```
+
 
 ## Models and Results From the Paper
 
 | Model              | val_seen SPL | val_unseen SPL | Config                                                                                                                                                                                   |
 |--------------------|--------------|----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Seq2Seq            | 0.24         | 0.18           | [seq2seq.yaml](vlnce_baselines/config/paper_configs/seq2seq.yaml)                                                                                                                        |
-| Seq2Seq_PM         | 0.21         | 0.15           | [seq2seq_pm.yaml](vlnce_baselines/config/paper_configs/seq2seq_pm.yaml)                                                                                                                  |
-| Seq2Seq_DA         | 0.32         | 0.23           | [seq2seq_da.yaml](vlnce_baselines/config/paper_configs/seq2seq_da.yaml)                                                                                                                  |
-| Seq2Seq_Aug        | 0.25         | 0.17           | [seq2seq_aug.yaml](vlnce_baselines/config/paper_configs/seq2seq_aug.yaml)  ⟶ [seq2seq_aug_tune.yaml](vlnce_baselines/config/paper_configs/seq2seq_aug_tune.yaml)                         |
-| Seq2Seq_PM_DA_Aug  | 0.31         | 0.22           | [seq2seq_pm_aug.yaml](vlnce_baselines/config/paper_configs/seq2seq_pm_aug.yaml)  ⟶ [seq2seq_pm_da_aug_tune.yaml](vlnce_baselines/config/paper_configs/seq2seq_pm_da_aug_tune.yaml) |
-| CMA                | 0.25         | 0.22           | [cma.yaml](vlnce_baselines/config/paper_configs/cma.yaml)                                                                                                                                |
-| CMA_PM             | 0.26         | 0.19           | [cma_pm.yaml](vlnce_baselines/config/paper_configs/cma_pm.yaml)                                                                                                                          |
-| CMA_DA             | 0.31         | 0.25           | [cma_da.yaml](vlnce_baselines/config/paper_configs/cma_da.yaml)                                                                                                                          |
-| CMA_Aug            | 0.24         | 0.19           | [cma_aug.yaml](vlnce_baselines/config/paper_configs/cma_aug.yaml)  ⟶ [cma_aug_tune.yaml](vlnce_baselines/config/paper_configs/cma_aug_tune.yaml)                                         |
-| **CMA_PM_DA_Aug**  | **0.35**     | **0.30**       | [cma_pm_aug.yaml](vlnce_baselines/config/paper_configs/cma_pm_aug.yaml)  ⟶ [cma_pm_da_aug_tune.yaml](vlnce_baselines/config/paper_configs/cma_pm_da_aug_tune.yaml)                 |
-| CMA_PM_Aug         | 0.25         | 0.22           | [cma_pm_aug.yaml](vlnce_baselines/config/paper_configs/cma_pm_aug.yaml)  ⟶ [cma_pm_aug_tune.yaml](vlnce_baselines/config/paper_configs/cma_pm_aug_tune.yaml)                             |
-| CMA_DA_Aug         | 0.33         | 0.26           | [cma_aug.yaml](vlnce_baselines/config/paper_configs/cma_aug.yaml)  ⟶ [cma_da_aug_tune.yaml](vlnce_baselines/config/paper_configs/cma_da_aug_tune.yaml)                             |
+| Seq2Seq            | 0.34         | 0.30           | [seq2seq_robo.yaml](robo_vln_baselines/config/paper_configs/seq2seq_robo.yaml)                                                                                                                        |
+| PM                 | 0.27         | 0.24           | [seq2seq_robo_pm.yaml](robo_vln_baselines/config/paper_configs/seq2seq_robo_pm.yaml)                                                                                                                  |
+| CMA                | 0.25         | 0.25           | [cma.yaml](robo_vln_baselines/config/paper_configs/cma.yaml)                                                                                                                  |
+| **HCM (Ours)**     | 0.43         | 0.40           | [hierarchical_cma.yaml](robo_vln_baselines/config/paper_configs/hierarchical_cma.yaml)                                                                                                                  |
 
 
 |         |  Legend                                                                                                                                               |
 |---------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Seq2Seq | Sequence-to-Sequence baseline model                                                                                                                   |
-| CMA     | Cross-Modal Attention model                                                                                                                           |
+| Seq2Seq | [Sequence-to-Sequence](https://github.com/jacobkrantz/VLN-CE). Please see our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf) on modification made to the model to match the continuous action spaces in robo-vln                                                                                                                                                          |
 | PM      | [Progress monitor](https://github.com/chihyaoma/selfmonitoring-agent)                                                                                 |
-| DA      | DAgger training (otherwise teacher forcing)                                                                                                           |
-| Aug     | Uses the [EnvDrop](https://github.com/airsplay/R2R-EnvDrop) episodes to augment the training set                                                      |
-| ⟶       | Use the config on the left to train the model. Evaluate each checkpoint on `val_unseen`. The best checkpoint (according to `val_unseen` SPL) is then fine-tuned using the config on the right. Make sure to update the field `DAGGER.CKPT_TO_LOAD` before fine-tuning. |
+| CMA     | [Cross-Modal Attention model](https://github.com/jacobkrantz/VLN-CE). Please see our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf) on modification made to the model to match the continuous action spaces in robo-vln                                                                                                                                                          |
+| **HCM**     | Hierarchical Cross-Modal Agent Module (The proposed hierarchical VLN model from our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf)).                                                                                                                                                                 |
 
-### Pretrained Models
-We provide pretrained models for our best Seq2Seq model [Seq2Seq_DA](https://drive.google.com/open?id=1gds-t8LAxuh236gk-5AWU0LzDg9rJmQS) and Cross-Modal Attention model ([CMA_PM_DA_Aug](https://drive.google.com/open?id=199hhL9M0yiurB3Hb_-DrpMRxWP1lSGX3)). These models are hosted on Google Drive and can be downloaded as such:
-```bash
-python -m pip install gdown
+### Pretrained Model
 
-# CMA_PM_DA_Aug (141MB)
-gdown https://drive.google.com/uc?id=199hhL9M0yiurB3Hb_-DrpMRxWP1lSGX3
-# Seq2Seq_DA (135MB)
-gdown https://drive.google.com/uc?id=1gds-t8LAxuh236gk-5AWU0LzDg9rJmQS
+We provide pretrained model for our best Hierarchical Cross-Modal Agent ([HCM](https://www.dropbox.com/s/4v8bqks7a8jgjzz/HCM_Agent.pth?dl=1)). Pre-trained Model can be downloaded as follows:
+
+| Pre-trained Model 	| Size  	|
+|--------------	|-------	|
+| [HCM_Agent.pth](https://www.dropbox.com/s/1h1rfx4bssz5qwy/robo_vln_v1.zip?dl=1) 	| 691 MB 	|
+
+## Citation
+
+If you find this repository useful, please cite our paper:
+
 ```
-
-## Contributing
-This codebase is under the MIT license. If you find something wrong or have a question, feel free to open an issue. If you would like to contribute, please install pre-commit before making commits in a pull request:
-```bash
-python -m pip install pre-commit
-pre-commit install
+@inproceedings{irshad2021hcm,
+    title={Hierarchical  Cross-Modal  Agent  for Robotics  Vision-and-Language  Navigation},
+    author={Muhammad Zubair Irshad and Chih-Yao Ma and Zsolt Kira},
+    booktitle={Proceedings of the IEEE International Conference on Robotics and Automation (ICRA)},
+    year={2021},
+    url={https://arxiv.org/abs/1901.03035},
+}
 ```
-
-## Citing

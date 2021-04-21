@@ -36,22 +36,6 @@ _C.TASK.VLN_ORACLE_ACTION_SENSOR.GOAL_RADIUS = 0.5
 _C.TASK.VLN_ORACLE_PROGRESS_SENSOR = Config()
 _C.TASK.VLN_ORACLE_PROGRESS_SENSOR.TYPE = "VLNOracleProgressSensor"
 
-# # -----------------------------------------------------------------------------
-# # # EGO MAP SENSOR
-# # -----------------------------------------------------------------------------
-# _C.TASK.EGO_SEM_SENSOR = CN()
-# _C.TASK.EGO_SEM_SENSOR.TYPE = "ego_map_sensor"
-# _C.TASK.EGO_SEM_SENSOR.MAP_RESOLUTION = (400, 400)
-# _C.TASK.EGO_SEM_SENSOR.MAP_TYPE = "semantic_map_sensor"
-# _C.TASK.EGO_SEM_SENSOR.WIDTH = 128
-# _C.TASK.EGO_SEM_SENSOR.HEIGHT = 128
-# _C.TASK.EGO_SEM_SENSOR.MAX_DEPTH = 0.25
-# _C.TASK.EGO_SEM_SENSOR.MAP_RANGE = 20
-# _C.TASK.EGO_SEM_SENSOR.HEIGHT_THRESHOLD = (0.2, 0.9)
-# _C.TASK.EGO_SEM_SENSOR.MAP_BOUNDS_X = (None, None)
-# _C.TASK.EGO_SEM_SENSOR.MAP_BOUNDS_Y = (None, None)
-# _C.TASK.EGO_SEM_SENSOR.COLORIZE = False
-
 # -----------------------------------------------------------------------------
 # NDTW MEASUREMENT
 # -----------------------------------------------------------------------------
