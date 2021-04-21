@@ -62,8 +62,7 @@ _C.DAGGER.UPDATE_SIZE = 5000
 _C.DAGGER.BATCH_SIZE = 3
 _C.DAGGER.P = 1.0
 _C.DAGGER.time_step = 1.0 / (30)
-# _C.DAGGER.LMDB_MAP_SIZE = 2.7e12
-_C.DAGGER.LMDB_MAP_SIZE = 1e9
+_C.DAGGER.LMDB_MAP_SIZE = 2.7e12
 _C.DAGGER.LMDB_EVAL_SIZE = 1e11
 _C.DAGGER.tbptt_steps = 100
 _C.DAGGER.split_dim = 0
@@ -72,7 +71,7 @@ _C.DAGGER.INTER_MODULE_ATTN = False
 
 # How often to commit the writes to the DB, less commits is
 # better, but everything must be in memory until a commit happens/
-_C.DAGGER.LMDB_COMMIT_FREQUENCY = 2
+_C.DAGGER.LMDB_COMMIT_FREQUENCY = 500
 _C.DAGGER.LMDB_STORE_FREQUENCY = 5
 
 _C.DAGGER.USE_IW = True

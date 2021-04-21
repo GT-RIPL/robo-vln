@@ -19,7 +19,6 @@ from fastdtw import fastdtw
 import habitat_sim
 import gzip
 from robo_vln_baselines.common.env_utils import construct_env
-import wandb
 from habitat.utils.visualizations import maps
 
 from habitat.utils.visualizations.utils import (
@@ -37,14 +36,9 @@ from habitat.utils.visualizations.utils import observations_to_image
 def save_map(observations, info, images):
 
     im = observations_to_image(observations,info )
-    # im = observations["rgb"]
     top_down_map = draw_top_down_map(
         info, im.shape[0]
     )
-
-    # depth_obs = observations['depth'].squeeze(2)
-    # depth_img = Image.fromarray((depth_obs / 10 * 255).astype(np.uint8), mode="RGB")
-    # output_im = np.concatenate((im, top_down_map), axis=1)
     output_im = im
     output_im = append_text_to_image(
         output_im, observations["instruction"]["text"]
@@ -145,11 +139,7 @@ def evaluate_agent(config: Config):
 
     aggregated_stats = {}
     num_episodes = len(stats_episodes)
-    # print("-----------------------------------------------")
-    # print(stats_episodes.values())
     for stat_key in next(iter(stats_episodes.values())).keys():
-        # for v in stats_episodes.values():
-        #     print (stat_key, "-------", v[stat_key])
         aggregated_stats[stat_key] = (
             sum([v[stat_key] for v in stats_episodes.values()]) / num_episodes
         )

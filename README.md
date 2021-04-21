@@ -10,7 +10,7 @@ International Conference on Robotics and Automation (ICRA), 2021<br>
 [[Project Page](https://zubair-irshad.github.io/projects/robo-vln.html)] [[arXiv](https://arxiv.org/abs/1901.03035)] [[GitHub](https://github.com/chihyaoma/selfmonitoring-agent)] 
 
 <p align="center">
-<img src="demo/ACMI_final.jpg" height="260px">
+<img src="demo/ACMI_final.jpg" height="300px">
 </p>
 
 ## Installation 
@@ -31,7 +31,7 @@ git submodule update
 
 Install `robo-vln` dependencies as follows:
 ```bash
-conda create -n habitat python=3.7 cmake=3.14.0
+conda create -n habitat python=3.6 cmake=3.14.0
 cd $robovln_rootdir
 python -m pip install -r requirements.txt
 ```
@@ -53,7 +53,7 @@ python setup.py install --headless --with-cuda
 
 ### Data
 
-Similar to Habitat-API, we expect a `data` folder (or symlink) with a particular structure in the top-level directory of this project.
+Similar to [Habitat-API](https://github.com/facebookresearch/habitat-lab), we expect a `data` folder (or symlink) with a particular structure in the top-level directory of this project.
 
 #### Matterport3D
 
@@ -174,10 +174,10 @@ python run.py --exp-config path/to/config.yaml --run-type {train | eval}
 For lists of modifiable configuration options, see the default [task config](habitat_extensions/config/default.py) and [experiment config](robo_vln_baselines/config/default.py) files.
 
 ### Evaluating Models
-Evaluation of models can be done by running `python run.py --exp-config path/to/experiment_config.yaml --run-type eval`. The relevant config entries for evaluation are:
+All models can be evaluated using `python run.py --exp-config path/to/config.yaml --run-type eval`. The relevant config entries for evaluation are:
+
 ```bash
 EVAL_CKPT_PATH_DIR  # path to a checkpoint or a directory of checkpoints
-
 EVAL.USE_CKPT_CONFIG  # if True, use the config saved in the checkpoint file
 EVAL.SPLIT  # which dataset split to evaluate on (typically val_seen or val_unseen)
 EVAL.EPISODE_COUNT  # how many episodes to evaluate
@@ -198,8 +198,14 @@ python run.py --exp-config robo_vln_baselines/config/paper_configs/robovln_data_
 python run.py --exp-config robo_vln_baselines/config/paper_configs/robovln_data_val.yaml --run-type train 
 ```
 
+### CUDA
+We use 2 GPUs to train our Hierarchical Model [hierarchical_cma.yaml](robo_vln_baselines/config/paper_configs/hierarchical_cma.yaml). To train the hierarchical model, dedicate 2 GPUs for training as follows:
 
-## Models and Results From the Paper
+```bash
+CUDA_VISIBLE_DEVICES=0,1 python run.py --exp-config robo_vln_baselines/config/paper_configs/hierarchical_cma.yaml --run-type train
+```
+
+## Models/Results From the Paper
 
 | Model              | val_seen SPL | val_unseen SPL | Config                                                                                                                                                                                   |
 |--------------------|--------------|----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -237,3 +243,6 @@ If you find this repository useful, please cite our paper:
     url={https://arxiv.org/abs/1901.03035},
 }
 ```
+
+## Acknowledgments
+* This code is built upon the implementation from [VLN-CE](https://github.com/jacobkrantz/VLN-CE)

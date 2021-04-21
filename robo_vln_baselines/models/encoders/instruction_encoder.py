@@ -76,18 +76,15 @@ class InstructionEncoder(nn.Module):
         """
 
         instruction = observations
-        # instruction = observations["instruction"].long()
 
         lengths = (instruction != 0.0).long().sum(dim=1)
+        lengths = lengths.cpu()
         embedded = self.embedding_layer(instruction)
         packed_seq = nn.utils.rnn.pack_padded_sequence(
             embedded, lengths, batch_first=True, enforce_sorted=False
         )
 
         output, final_state = self.encoder_rnn(packed_seq)
-
-        # if self.config.rnn_type == "LSTM":
-        #     final_state = final_state[0]
 
         if self.final_state_only:
             return final_state[0].squeeze(0)

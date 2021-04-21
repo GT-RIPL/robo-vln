@@ -32,8 +32,6 @@ from habitat_baselines.common.baseline_registry import baseline_registry
 from habitat_baselines.common.environments import get_env_class
 from habitat_baselines.common.tensorboard_utils import TensorboardWriter
 
-# # WandB – Import the wandb library
-import wandb
 from habitat_baselines.common.utils import generate_video
 from robo_vln_baselines.common.continuous_path_follower import (
     ContinuousPathFollower,
@@ -55,19 +53,6 @@ from robo_vln_baselines.models.seq2seq_lowlevel import Seq2Seq_LowLevel
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=FutureWarning)
     import tensorflow as tf
-
-# # from pynvml import *
-# # nvmlInit()
-
-# WandB – Login to your wandb account so you can log all your metrics
-wandb.login()
-
-wandb.init(project="hierarchical_inter_module", sync_tensorboard=True)
-
-wb_config = wandb.config
-wb_config.LR = 1e-4
-wb_config.EPOCHS = 20
-wb_config.BATCH_SIZE = 1
 
 
 class ObservationsDict(dict):
@@ -912,7 +897,7 @@ class RoboDaggerTrainer(BaseRLTrainer):
             self.envs = None
 
         with TensorboardWriter(
-            wandb.run.dir, flush_secs=self.flush_secs, purge_step=0
+            self.config.TENSORBOARD_DIR, flush_secs=self.flush_secs, purge_step=0
         ) as writer:
             for dagger_it in range(self.config.DAGGER.ITERATIONS):
                 step_id = 0

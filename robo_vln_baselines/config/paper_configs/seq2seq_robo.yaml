@@ -4,9 +4,9 @@ TORCH_GPU_ID: 0
 NUM_PROCESSES: 1
 TRAINER_NAME : "robo_vln_trainer"
 
-TENSORBOARD_DIR: data/robo-vln/tensorboard_dirs/seq2seq_glove
-CHECKPOINT_FOLDER: data/robo-vln/checkpoints/seq2seq_glove
-EVAL_CKPT_PATH_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/seq2seq_glove_complete/ckpt.33.pth
+TENSORBOARD_DIR: data/robo-vln/tensorboard_dirs/seq2seq
+CHECKPOINT_FOLDER: data/robo-vln/checkpoints/seq2seq
+EVAL_CKPT_PATH_DIR: data/robo-vln/checkpoints/seq2seq
 # EVAL_CKPT_PATH_DIR: data/robo-vln/checkpoints/seq2seq_glove
 
 VIDEO_DIR: ""
@@ -17,7 +17,7 @@ EVAL:
   USE_CKPT_CONFIG: False
   SPLIT: val_seen
   EPISODE_COUNT: 570
-  VAL_LOG_DIR : validation_logging/seq2seq_glove
+  VAL_LOG_DIR : validation_logging/seq2seq
 DAGGER:
   ITERATIONS: 1
   EPOCHS: 25
@@ -26,8 +26,8 @@ DAGGER:
   BATCH_SIZE: 1
   P: 1.0
   PRELOAD_LMDB_FEATURES: True
-  LMDB_FEATURES_DIR: /srv/share2/mirshad7/data/robo-vln/trajectory_dir/robo_complete/train/trajectories.lmdb
-  LMDB_EVAL_DIR: /srv/share2/mirshad7/data/robo-vln/trajectory_dir/robo_complete/val_seen/trajectories.lmdb
+  LMDB_FEATURES_DIR: data/trajectories_dirs/robo-vln/train/trajectories.lmdb
+  LMDB_EVAL_DIR: data/trajectories_dirs/robo-vln/val_seen/trajectories.lmdb
 
 MODEL:
   PROGRESS_MONITOR:

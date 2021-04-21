@@ -4,11 +4,11 @@ TORCH_GPU_ID: 0
 NUM_PROCESSES: 1
 TRAINER_NAME : "robo_vln_trainer"
 
-TENSORBOARD_DIR: /srv/share/mirshad7/data/robo-vln/tensorboard_dirs/seq2seq_bert
-CHECKPOINT_FOLDER: /srv/share/mirshad7/data/robo-vln/checkpoints/seq2seq_bert_complete
-EVAL_CKPT_PATH_DIR: /srv/share/mirshad7/data/robo-vln/checkpoints/pm/ckpt.28.pth
+TENSORBOARD_DIR: data/robo-vln/tensorboard_dirs/seq2seq_pm
+CHECKPOINT_FOLDER: data/robo-vln/checkpoints/seq2seq_pm
+EVAL_CKPT_PATH_DIR: data/robo-vln/checkpoints/seq2seq_pm
 
-VIDEO_DIR: "videos/debug/icra_results"
+VIDEO_DIR: ""
 PLOT_ATTENTION: False
 VIDEO_OPTION: []  # options: "disk", "tensorboard"
 
@@ -16,7 +16,7 @@ EVAL:
   USE_CKPT_CONFIG: False
   SPLIT: val_seen
   EPISODE_COUNT: 570
-  VAL_LOG_DIR : validation_logging/pm/ckpt28/complete_seen
+  VAL_LOG_DIR : validation_logging/seq2seq_pm/
 DAGGER:
   ITERATIONS: 1
   EPOCHS: 25
@@ -25,8 +25,8 @@ DAGGER:
   BATCH_SIZE: 1
   P: 1.0
   PRELOAD_LMDB_FEATURES: True
-  LMDB_FEATURES_DIR: /srv/share2/mirshad7/data/robo-vln/trajectory_dir/robo_complete/train/trajectories.lmdb
-  LMDB_EVAL_DIR: /srv/share2/mirshad7/data/robo-vln/trajectory_dir/robo_complete/val_seen/trajectories.lmdb
+  LMDB_FEATURES_DIR: data/trajectories_dirs/robo-vln/train/trajectories.lmdb
+  LMDB_EVAL_DIR: data/trajectories_dirs/robo-vln/val_seen/trajectories.lmdb
 
 MODEL:
   PROGRESS_MONITOR:

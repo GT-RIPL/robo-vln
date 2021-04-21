@@ -20,12 +20,12 @@ EVAL:
 DAGGER:
   ITERATIONS: 1
   EPOCHS: 25
-  UPDATE_SIZE: 7739
-  COLLECT_DATA_SPLIT: train
+  UPDATE_SIZE: 570
+  COLLECT_DATA_SPLIT: val_seen
   BATCH_SIZE: 1
   P: 1.0
   PRELOAD_LMDB_FEATURES: False
-  LMDB_FEATURES_DIR: data/trajectories_dirs/robo-vln/train/trajectories.lmdb
+  LMDB_FEATURES_DIR: data/trajectories_dirs/robo-vln/val_seen/trajectories.lmdb
 
 MODEL:
   INSTRUCTION_ENCODER:
