@@ -146,10 +146,16 @@ class Success(Measure):
             current_position, episode.goals[0].position
         )
 
+        # self._metric = (
+        #     hasattr(task, "is_stop_called")
+        #     and task.is_stop_called
+        #     and distance_to_target < self._config.SUCCESS_DISTANCE
+        # )
+
         self._metric = (
-            hasattr(task, "is_stop_called")
-            and task.is_stop_called
-            and distance_to_target < self._config.SUCCESS_DISTANCE
+            # hasattr(task, "is_stop_called")
+            # and task.is_stop_called 
+            distance_to_target < self._config.SUCCESS_DISTANCE
         )
 
     @staticmethod
@@ -157,40 +163,40 @@ class Success(Measure):
         return "success"
 
 
-@registry.register_measure
-class OracleSuccess(Measure):
-    r"""Oracle Success Rate (OSR)
+# @registry.register_measure
+# class OracleSuccess(Measure):
+#     r"""Oracle Success Rate (OSR)
 
-    OSR = I(ONE <= goal_radius),
-    where ONE is Oracle Navigation Error.
-    """
+#     OSR = I(ONE <= goal_radius),
+#     where ONE is Oracle Navigation Error.
+#     """
 
-    def __init__(self, *args: Any, sim: Simulator, config: Config, **kwargs: Any):
-        self._sim = sim
-        self._config = config
-        super().__init__()
+#     def __init__(self, *args: Any, sim: Simulator, config: Config, **kwargs: Any):
+#         self._sim = sim
+#         self._config = config
+#         super().__init__()
 
-    def reset_metric(self, *args: Any, episode, **kwargs: Any):
-        self._metric = 0
+#     def reset_metric(self, *args: Any, episode, **kwargs: Any):
+#         self._metric = 0
 
-    def update_metric(
-        self, *args: Any, episode, action, task: EmbodiedTask, **kwargs: Any
-    ):
-        if self._metric:
-            # skip, already had oracle success
-            return
+#     def update_metric(
+#         self, *args: Any, episode, action, task: EmbodiedTask, **kwargs: Any
+#     ):
+#         if self._metric:
+#             # skip, already had oracle success
+#             return
 
-        current_position = self._sim.get_agent_state().position.tolist()
-        distance_to_target = self._sim.geodesic_distance(
-            current_position, episode.goals[0].position
-        )
+#         current_position = self._sim.get_agent_state().position.tolist()
+#         distance_to_target = self._sim.geodesic_distance(
+#             current_position, episode.goals[0].position
+#         )
 
-        if distance_to_target < self._config.SUCCESS_DISTANCE:
-            self._metric = 1
+#         if distance_to_target < self._config.SUCCESS_DISTANCE:
+#             self._metric = 1
 
-    @staticmethod
-    def _get_uuid(*args: Any, **kwargs: Any):
-        return "oracle_success"
+#     @staticmethod
+#     def _get_uuid(*args: Any, **kwargs: Any):
+#         return "oracle_success"
 
 
 @registry.register_measure

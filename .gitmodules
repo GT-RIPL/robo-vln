@@ -1,0 +1,12 @@
+[submodule "envioronments/habitat-lab"]
+	path = envioronments/habitat-lab
+	url = https://github.com/zubair-irshad/habitat-lab
+[submodule "envioronments/habitat-sim"]
+	path = envioronments/habitat-sim
+	url = https://github.com/zubair-irshad/habitat-sim
+[submodule "environments/habitat-lab"]
+	path = environments/habitat-lab
+	url = https://github.com/zubair-irshad/habitat-lab
+[submodule "environments/habitat-sim"]
+	path = environments/habitat-sim
+	url = https://github.com/zubair-irshad/habitat-sim

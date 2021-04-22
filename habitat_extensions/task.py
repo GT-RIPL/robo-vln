@@ -50,7 +50,6 @@ class VLNCEDatasetV1(Dataset):
     def get_scenes_to_load(cls, config: Config) -> List[str]:
         r"""Return a sorted list of scenes
         """
-        print("config:---------------------------------------------------------\n", config)
         assert cls.check_config_paths_exist(config)
         dataset = cls(config)
         scenes = {cls._scene_from_episode(episode) for episode in dataset.episodes}

@@ -9,9 +9,9 @@ from habitat import logger
 from habitat_baselines.common.baseline_registry import baseline_registry
 
 import habitat_extensions
-import vlnce_baselines
-from vlnce_baselines.config.default import get_config
-from vlnce_baselines.nonlearning_agents import evaluate_agent
+import robo_vln_baselines
+from robo_vln_baselines.config.default import get_config
+from robo_vln_baselines.nonlearning_agents import evaluate_agent
 
 
 def main():
