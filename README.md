@@ -1,5 +1,5 @@
 # Hierarchical Cross-Modal Agent for Robotics Vision-and-Language Navigation
-<img src="demo/Pytorch_logo.png" width="10%"> [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
+<img src="demo/Pytorch_logo.png" width="10%"> [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/hierarchical-cross-modal-agent-for-robotics-1/vision-and-language-navigation-on-robo-vln)](https://paperswithcode.com/sota/vision-and-language-navigation-on-robo-vln?p=hierarchical-cross-modal-agent-for-robotics-1)
 
 This repository is the pytorch implementation of our paper:
 
@@ -18,7 +18,7 @@ International Conference on Robotics and Automation (ICRA), 2021<br>
 Clone the current repository and required submodules:
 
 ```bash
-git clone https://github.com/zubair-irshad/robo-vln
+git clone https://github.com/GT-RIPL/robo-vln
 cd robo-vln
   
 export robovln_rootdir=$PWD
@@ -36,7 +36,7 @@ cd $robovln_rootdir
 python -m pip install -r requirements.txt
 ```
 
-We use modified versions of [Habitat-Sim](https://github.com/facebookresearch/habitat-sim) and [Habitat-API](https://github.com/facebookresearch/habitat-lab) to support continuous control/action-spaces in Habitat Simulator. The details regarding continuous action spaces and converting discrete VLN dataset into continuous control formulation can be found in our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf). The specific commits of our modified [Habitat-Sim](https://github.com/facebookresearch/habitat-sim) and [Habitat-API](https://github.com/facebookresearch/habitat-lab) versions are mentioned below.
+We use modified versions of [Habitat-Sim](https://github.com/facebookresearch/habitat-sim) and [Habitat-API](https://github.com/facebookresearch/habitat-lab) to support continuous control/action-spaces in Habitat Simulator. The details regarding continuous action spaces and converting discrete VLN dataset into continuous control formulation can be found in our [paper](https://arxiv.org/pdf/2104.10674.pdf). The specific commits of our modified [Habitat-Sim](https://github.com/facebookresearch/habitat-sim) and [Habitat-API](https://github.com/facebookresearch/habitat-lab) versions are mentioned below.
 
 ```bash	
 # installs both habitat-api and habitat_baselines
@@ -71,7 +71,7 @@ Extract this data to `data/scene_datasets/mp3d` such that it has the form `data/
 <img src="demo/GIF.gif" width="100%">
 </p>
 
-The Robo-VLN dataset is a continuous control formualtion of the VLN-CE dataset by [Krantz et al](https://arxiv.org/pdf/2004.02857.pdf) ported over from Room-to-Room (R2R) dataset created by [Anderson et al](http://openaccess.thecvf.com/content_cvpr_2018/papers/Anderson_Vision-and-Language_Navigation_Interpreting_CVPR_2018_paper.pdf). The details regarding converting discrete VLN dataset into continuous control formulation can be found in our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf). 
+The Robo-VLN dataset is a continuous control formualtion of the VLN-CE dataset by [Krantz et al](https://arxiv.org/pdf/2004.02857.pdf) ported over from Room-to-Room (R2R) dataset created by [Anderson et al](http://openaccess.thecvf.com/content_cvpr_2018/papers/Anderson_Vision-and-Language_Navigation_Interpreting_CVPR_2018_paper.pdf). The details regarding converting discrete VLN dataset into continuous control formulation can be found in our [paper](https://arxiv.org/pdf/2104.10674.pdf). 
 
 | Dataset 	| Path to extract              	| Size  	|
 |--------------	|----------------------------	|-------	|
@@ -221,10 +221,10 @@ CUDA_VISIBLE_DEVICES=0,1 python run.py --exp-config robo_vln_baselines/config/pa
 
 |         |  Legend                                                                                                                                               |
 |---------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Seq2Seq | [Sequence-to-Sequence](https://github.com/jacobkrantz/VLN-CE). Please see our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf) on modification made to the model to match the continuous action spaces in robo-vln                                                                                                                                                          |
+| Seq2Seq | [Sequence-to-Sequence](https://github.com/jacobkrantz/VLN-CE). Please see our [paper](https://arxiv.org/pdf/2104.10674.pdf) on modification made to the model to match the continuous action spaces in robo-vln                                                                                                                                                          |
 | PM      | [Progress monitor](https://github.com/chihyaoma/selfmonitoring-agent)                                                                                 |
-| CMA     | [Cross-Modal Attention model](https://github.com/jacobkrantz/VLN-CE). Please see our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf) on modification made to the model to match the continuous action spaces in robo-vln                                                                                                                                                          |
-| **HCM**     | Hierarchical Cross-Modal Agent Module (The proposed hierarchical VLN model from our [paper](https://github.com/zubair-irshad/zubair-irshad.github.io/blob/master/projects/resources/HCM_ICRA21.pdf)).                                                                                                                                                                 |
+| CMA     | [Cross-Modal Attention model](https://github.com/jacobkrantz/VLN-CE). Please see our [paper](https://arxiv.org/pdf/2104.10674.pdf) on modification made to the model to match the continuous action spaces in robo-vln                                                                                                                                                          |
+| **HCM**     | Hierarchical Cross-Modal Agent Module (The proposed hierarchical VLN model from our [paper](https://arxiv.org/pdf/2104.10674.pdf)).                                                                                                                                                                 |
 
 ### Pretrained Model
 
@@ -232,7 +232,7 @@ We provide pretrained model for our best Hierarchical Cross-Modal Agent ([HCM](h
 
 | Pre-trained Model 	| Size  	|
 |--------------	|-------	|
-| [HCM_Agent.pth](https://www.dropbox.com/s/1h1rfx4bssz5qwy/robo_vln_v1.zip?dl=1) 	| 691 MB 	|
+| [HCM_Agent.pth](https://www.dropbox.com/s/4v8bqks7a8jgjzz/HCM_Agent.pth?dl=1) 	| 691 MB 	|
 
 ## Citation
 
