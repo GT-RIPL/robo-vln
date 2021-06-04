@@ -100,7 +100,7 @@ _C.MODEL.INSTRUCTION_ENCODER.vocab_size = 2504
 _C.MODEL.INSTRUCTION_ENCODER.max_length = 200
 _C.MODEL.INSTRUCTION_ENCODER.use_pretrained_embeddings = True
 _C.MODEL.INSTRUCTION_ENCODER.embedding_file = (
-    "data/datasets/robo_vln/embeddings.json.gz"
+    "data/datasets/robo_vln_v1/embeddings.json.gz"
 )
 _C.MODEL.INSTRUCTION_ENCODER.dataset_vocab = (
     "data/datasets/R2R_VLNCE_v1_preprocessed/train/train.json.gz"

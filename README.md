@@ -75,7 +75,7 @@ The Robo-VLN dataset is a continuous control formualtion of the VLN-CE dataset b
 
 | Dataset 	| Path to extract              	| Size  	|
 |--------------	|----------------------------	|-------	|
-| [robo_vln_v1.zip](https://www.dropbox.com/s/1h1rfx4bssz5qwy/robo_vln_v1.zip?dl=1) 	| `data/datasets/robo_vln_v1`          	| 76.9 MB 	|
+| [robo_vln_v1.zip](https://www.dropbox.com/s/1e339avr84tfrbt/robo_vln_v1.zip?dl=1) 	| `data/datasets/robo_vln_v1`          	| 76.9 MB 	|
 
 #### Robo-VLN Dataset
 
