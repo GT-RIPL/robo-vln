@@ -13,6 +13,28 @@ International Conference on Robotics and Automation (ICRA), 2021<br>
 <img src="demo/ACMI_final.jpg" width="100%">
 </p>
 
+## Citation
+
+If you find this repository useful, please cite our paper:
+
+```
+@inproceedings{irshad2021hierarchical,
+  title={Hierarchical Cross-Modal Agent for Robotics Vision-and-Language Navigation},
+  author={Muhammad Zubair Irshad and Chih-Yao Ma and Zsolt Kira},
+  journal={Proceedings of the IEEE International Conference on Robotics and Automation (ICRA)},
+  year={2021},
+  url={https://arxiv.org/abs/2104.10674}
+}
+
+@inproceedings{irshad2022sasra,
+  title={SASRA: Semantically-aware Spatio-temporal Reasoning Agent for Vision-and-Language Navigation in Continuous Environments},
+  author={Muhammad Zubair Irshad and Niluthpol Chowdhury Mithun and Zachary Seymour and Han-Pang Chiu and Supun Samarasekera and Rakesh Kumar},
+  journal={International Conference on Pattern Recognition (ICPR)},
+  year={2022},
+  url={https://arxiv.org/abs/2108.11945},
+}
+```
+
 ## Installation 
 
 Clone the current repository and required submodules:
@@ -229,20 +251,6 @@ We provide pretrained model for our best Hierarchical Cross-Modal Agent ([HCM](h
 | Pre-trained Model 	| Size  	|
 |--------------	|-------	|
 | [HCM_Agent.pth](https://www.dropbox.com/s/4v8bqks7a8jgjzz/HCM_Agent.pth?dl=1) 	| 691 MB 	|
-
-## Citation
-
-If you find this repository useful, please cite our paper:
-
-```
-@inproceedings{irshad2021hierarchical,
-title={Hierarchical Cross-Modal Agent for Robotics Vision-and-Language Navigation},
-author={Muhammad Zubair Irshad and Chih-Yao Ma and Zsolt Kira},
-booktitle={Proceedings of the IEEE International Conference on Robotics and Automation (ICRA)},
-year={2021},
-url={https://arxiv.org/abs/2104.10674}
-}
-```
 
 ## Acknowledgments
 * This code is built upon the implementation from [VLN-CE](https://github.com/jacobkrantz/VLN-CE)
