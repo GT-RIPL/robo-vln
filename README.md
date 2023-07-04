@@ -184,7 +184,7 @@ Format of `{split}.json.gz`
 }
 ```
 #### Depth Encoder Weights
-Similar to [VLN-CE](https://arxiv.org/pdf/2004.02857.pdf), our learning-based models utilizes a depth encoder pretained on a large-scale point-goal navigation task i.e. [DDPPO](https://arxiv.org/abs/1911.00357). We utilize depth pretraining by using the DDPPO features from the ResNet50 from the original paper. The pretrained network can be downloaded [here](https://github.com/facebookresearch/habitat-lab/tree/master/habitat_baselines/rl/ddppo). Extract the contents of `ddppo-models.zip` to `data/ddppo-models/{model}.pth`.
+Similar to [VLN-CE](https://arxiv.org/pdf/2004.02857.pdf), our learning-based models utilizes a depth encoder pretained on a large-scale point-goal navigation task i.e. [DDPPO](https://arxiv.org/abs/1911.00357). We utilize depth pretraining by using the DDPPO features from the ResNet50 from the original paper. The pretrained network can be downloaded [here](https://dl.fbaipublicfiles.com/habitat/data/baselines/v1/ddppo/ddppo-models.zip). Extract the contents of `ddppo-models.zip` to `data/ddppo-models/{model}.pth`.
 
 ## Training and reproducing results
 
