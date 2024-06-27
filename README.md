@@ -21,18 +21,20 @@ If you find this repository useful, please cite our paper:
 @inproceedings{irshad2021hierarchical,
   title={Hierarchical Cross-Modal Agent for Robotics Vision-and-Language Navigation},
   author={Muhammad Zubair Irshad and Chih-Yao Ma and Zsolt Kira},
-  journal={Proceedings of the IEEE International Conference on Robotics and Automation (ICRA)},
-  year={2021},
-  url={https://arxiv.org/abs/2104.10674}
-}
+  booktitle={Proceedings of the IEEE International Conference on Robotics and Automation (ICRA)},
+  year={2021}
+  }
 
-@inproceedings{irshad2022sasra,
-  title={SASRA: Semantically-aware Spatio-temporal Reasoning Agent for Vision-and-Language Navigation in Continuous Environments},
-  author={Muhammad Zubair Irshad and Niluthpol Chowdhury Mithun and Zachary Seymour and Han-Pang Chiu and Supun Samarasekera and Rakesh Kumar},
-  journal={International Conference on Pattern Recognition (ICPR)},
-  year={2022},
-  url={https://arxiv.org/abs/2108.11945},
-}
+@INPROCEEDINGS{irshad2022sasra,
+        author={Irshad, Muhammad Zubair and Chowdhury Mithun, Niluthpol and Seymour, Zachary and Chiu, Han-Pang and Samarasekera, Supun and Kumar, Rakesh},
+        booktitle={2022 26th International Conference on Pattern Recognition (ICPR)}, 
+        title={Semantically-aware Spatio-temporal Reasoning Agent for Vision-and-Language Navigation in Continuous Environments}, 
+        year={2022},
+        volume={},
+        number={},
+        pages={4065-4071},
+        keywords={Visualization;Three-dimensional displays;Navigation;Semantics;Natural languages;Transformers;Feature extraction},
+        doi={10.1109/ICPR56361.2022.9956561}}
 ```
 
 ## Installation 
